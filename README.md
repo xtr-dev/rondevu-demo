@@ -8,9 +8,9 @@
 
 Experience how easy WebRTC peer discovery can be with Rondevu's three connection methods:
 
-🎯 **Connect by Topic** - Auto-discover and join any available peer
-👤 **Connect by Peer ID** - Filter and connect to specific peers
-🔗 **Connect by Connection ID** - Share a code and connect directly
+🎯 **Connect by Topic** - Auto-discover and join any available peer  
+👤 **Connect by Peer ID** - Filter and connect to specific peers  
+🔗 **Connect by Connection ID** - Share a code and connect directly  
 
 ### Features
 
