@@ -441,7 +441,12 @@ function App() {
         {step === 1 && (
           <ActionSelector
             action={action}
-            onSelectAction={setAction}
+            onSelectAction={(selectedAction) => {
+              setAction(selectedAction);
+              if (selectedAction !== 'scan') {
+                setStep(2);
+              }
+            }}
             onScanComplete={handleScanComplete}
             onScanCancel={handleScanCancel}
             log={log}
