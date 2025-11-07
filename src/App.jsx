@@ -1,7 +1,11 @@
 import { useState, useEffect, useRef } from 'react';
 import { Rondevu, RondevuClient } from '@xtr-dev/rondevu-client';
 import QRCode from 'qrcode';
-import { BrowserQRCodeReader } from '@zxing/library';
+import Header from './components/Header';
+import ActionSelector from './components/ActionSelector';
+import MethodSelector from './components/MethodSelector';
+import ConnectionForm from './components/ConnectionForm';
+import ChatView from './components/ChatView';
 
 const rdv = new Rondevu({
   baseUrl: 'https://rondevu.xtrdev.workers.dev',
@@ -44,13 +48,12 @@ function App() {
   const [messageInput, setMessageInput] = useState('');
   const [logs, setLogs] = useState([]);
   const [channelReady, setChannelReady] = useState(false);
+  const [fileUploadProgress, setFileUploadProgress] = useState(null);
 
   const connectionRef = useRef(null);
   const dataChannelRef = useRef(null);
-  const fileInputRef = useRef(null);
   const fileTransfersRef = useRef(new Map()); // Track ongoing file transfers
-  const videoRef = useRef(null);
-  const scannerRef = useRef(null);
+  const uploadCancelRef = useRef(false);
 
   useEffect(() => {
     log('Demo initialized', 'info');
@@ -195,68 +198,6 @@ function App() {
     }
   };
 
-  const startScanning = async () => {
-    try {
-      scannerRef.current = new BrowserQRCodeReader();
-      log('Starting QR scanner...', 'info');
-
-      const videoInputDevices = await scannerRef.current.listVideoInputDevices();
-
-      if (videoInputDevices.length === 0) {
-        log('No camera found', 'error');
-        return;
-      }
-
-      // Prefer back camera (environment-facing)
-      let selectedDeviceId = videoInputDevices[0].deviceId;
-      const backCamera = videoInputDevices.find(device =>
-        device.label.toLowerCase().includes('back') ||
-        device.label.toLowerCase().includes('rear') ||
-        device.label.toLowerCase().includes('environment')
-      );
-
-      if (backCamera) {
-        selectedDeviceId = backCamera.deviceId;
-        log('Using back camera', 'info');
-      } else {
-        log('Back camera not found, using default', 'info');
-      }
-
-      scannerRef.current.decodeFromVideoDevice(
-        selectedDeviceId,
-        videoRef.current,
-        (result, err) => {
-          if (result) {
-            const scannedId = result.getText();
-            log(`Scanned: ${scannedId}`, 'success');
-            setConnectionId(scannedId);
-            stopScanning();
-            setMethod('connection-id');
-            setStep(3);
-          }
-        }
-      );
-    } catch (error) {
-      log(`Scanner error: ${error.message}`, 'error');
-    }
-  };
-
-  const stopScanning = () => {
-    if (scannerRef.current) {
-      scannerRef.current.reset();
-      log('Scanner stopped', 'info');
-    }
-  };
-
-  useEffect(() => {
-    if (action === 'scan') {
-      startScanning();
-    }
-    return () => {
-      stopScanning();
-    };
-  }, [action]);
-
   const sendMessage = () => {
     if (!messageInput || !channelReady || !dataChannelRef.current) {
       return;
@@ -281,6 +222,10 @@ function App() {
 
     const CHUNK_SIZE = 16384; // 16KB chunks
     const fileId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+    uploadCancelRef.current = false;
+    setFileUploadProgress({ fileName: file.name, progress: 0 });
 
     log(`Sending file: ${file.name} (${(file.size / 1024).toFixed(2)} KB)`, 'info');
 
@@ -292,7 +237,7 @@ function App() {
         name: file.name,
         size: file.size,
         mimeType: file.type,
-        chunks: Math.ceil(file.size / CHUNK_SIZE)
+        chunks: totalChunks
       };
       dataChannelRef.current.send(JSON.stringify(metadata));
 
@@ -302,11 +247,22 @@ function App() {
       let chunkIndex = 0;
 
       const readChunk = () => {
+        if (uploadCancelRef.current) {
+          setFileUploadProgress(null);
+          log('File upload cancelled', 'info');
+          return;
+        }
+
         const slice = file.slice(offset, offset + CHUNK_SIZE);
         reader.readAsArrayBuffer(slice);
       };
 
       reader.onload = (e) => {
+        if (uploadCancelRef.current) {
+          setFileUploadProgress(null);
+          return;
+        }
+
         const chunk = {
           type: 'file-chunk',
           fileId,
@@ -317,6 +273,10 @@ function App() {
 
         offset += CHUNK_SIZE;
         chunkIndex++;
+
+        // Update progress
+        const progress = Math.round((chunkIndex / totalChunks) * 100);
+        setFileUploadProgress({ fileName: file.name, progress });
 
         if (offset < file.size) {
           readChunk();
@@ -338,21 +298,29 @@ function App() {
             timestamp: new Date()
           }]);
 
+          setFileUploadProgress(null);
           log(`File sent: ${file.name}`, 'success');
         }
       };
 
       reader.onerror = () => {
+        setFileUploadProgress(null);
         log(`Error reading file: ${file.name}`, 'error');
       };
 
       readChunk();
     } catch (error) {
+      setFileUploadProgress(null);
       log(`Error sending file: ${error.message}`, 'error');
     }
 
     // Reset file input
     event.target.value = '';
+  };
+
+  const cancelFileUpload = () => {
+    uploadCancelRef.current = true;
+    setFileUploadProgress(null);
   };
 
   const handleReceivedMessage = (data) => {
@@ -437,7 +405,6 @@ function App() {
     if (connectionRef.current) {
       connectionRef.current.close();
     }
-    stopScanning();
     setStep(1);
     setAction(null);
     setMethod(null);
@@ -455,317 +422,81 @@ function App() {
     dataChannelRef.current = null;
   };
 
+  const handleScanComplete = (scannedId) => {
+    setConnectionId(scannedId);
+    setAction('join');
+    setMethod('connection-id');
+    setStep(3);
+  };
+
+  const handleScanCancel = () => {
+    setAction(null);
+  };
+
   return (
     <div className="app">
-      <header className="header">
-        <div className="header-content">
-          <h1>Rondevu</h1>
-          <p className="tagline">Meet WebRTC peers by topic, peer ID, or connection ID</p>
-          <div className="header-links">
-            <a href="https://github.com/xtr-dev/rondevu-client" target="_blank" rel="noopener noreferrer">
-              <svg className="github-icon" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-              </svg>
-              Client
-            </a>
-            <a href="https://github.com/xtr-dev/rondevu-server" target="_blank" rel="noopener noreferrer">
-              <svg className="github-icon" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-              </svg>
-              Server
-            </a>
-            <a href="https://github.com/xtr-dev/rondevu-demo" target="_blank" rel="noopener noreferrer">
-              <svg className="github-icon" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
-                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
-              </svg>
-              View source
-            </a>
-          </div>
-        </div>
-      </header>
+      <Header />
 
       <main className="main">
         {step === 1 && (
-          <div className="step-container">
-            <h2>Choose Action</h2>
-            <div className="button-grid button-grid-three">
-              <button
-                className="action-button"
-                onClick={() => {
-                  setAction('create');
-                  setStep(2);
-                }}
-              >
-                <div className="button-title">Create</div>
-                <div className="button-description">Start a new connection</div>
-              </button>
-              <button
-                className="action-button"
-                onClick={() => {
-                  setAction('join');
-                  setStep(2);
-                }}
-              >
-                <div className="button-title">Join</div>
-                <div className="button-description">Connect to existing peers</div>
-              </button>
-              <button
-                className="action-button"
-                onClick={() => {
-                  setAction('scan');
-                }}
-              >
-                <div className="button-title">Scan QR</div>
-                <div className="button-description">Scan a connection code</div>
-              </button>
-            </div>
-            {action === 'scan' && (
-              <div className="scanner-container">
-                <video ref={videoRef} className="scanner-video" />
-                <button className="back-button" onClick={() => setAction(null)}>← Cancel</button>
-              </div>
-            )}
-          </div>
+          <ActionSelector
+            action={action}
+            onSelectAction={setAction}
+            onScanComplete={handleScanComplete}
+            onScanCancel={handleScanCancel}
+            log={log}
+          />
         )}
 
         {step === 2 && (
-          <div className="step-container">
-            <h2>{action === 'create' ? 'Create' : 'Join'} by...</h2>
-            <div className="button-grid">
-              <button
-                className="action-button"
-                onClick={() => {
-                  setMethod('topic');
-                  setStep(3);
-                }}
-              >
-                <div className="button-title">Topic</div>
-                <div className="button-description">
-                  {action === 'create' ? 'Create in a topic' : 'Auto-connect to first peer'}
-                </div>
-              </button>
-              {action === 'join' && (
-                <button
-                  className="action-button"
-                  onClick={() => {
-                    setMethod('peer-id');
-                    setStep(3);
-                  }}
-                >
-                  <div className="button-title">Peer ID</div>
-                  <div className="button-description">Connect to specific peer</div>
-                </button>
-              )}
-              <button
-                className="action-button"
-                onClick={() => {
-                  setMethod('connection-id');
-                  setStep(3);
-                }}
-              >
-                <div className="button-title">Connection ID</div>
-                <div className="button-description">
-                  {action === 'create' ? 'Custom connection code' : 'Direct connection'}
-                </div>
-              </button>
-            </div>
-            <button className="back-button" onClick={() => setStep(1)}>← Back</button>
-          </div>
+          <MethodSelector
+            action={action}
+            onSelectMethod={(m) => {
+              setMethod(m);
+              setStep(3);
+            }}
+            onBack={() => setStep(1)}
+          />
         )}
 
         {step === 3 && (
-          <div className="step-container">
-            <h2>Enter Details</h2>
-            <div className="form-container">
-              {(method === 'topic' || (method === 'peer-id') || (method === 'connection-id' && action === 'create')) && (
-                <div className="form-group">
-                  <label>Topic</label>
-                  <input
-                    type="text"
-                    value={topic}
-                    onChange={(e) => setTopic(e.target.value)}
-                    placeholder="e.g., game-room"
-                    autoFocus
-                  />
-                  {topics.length > 0 && (
-                    <div className="topic-list">
-                      {topics.map((t) => (
-                        <button
-                          key={t.topic}
-                          className="topic-item"
-                          onClick={() => {
-                            setTopic(t.topic);
-                            if (method === 'peer-id') {
-                              discoverPeers(t.topic);
-                            }
-                          }}
-                        >
-                          {t.topic} <span className="peer-count">({t.count})</span>
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {method === 'peer-id' && (
-                <div className="form-group">
-                  <label>Peer ID</label>
-                  <input
-                    type="text"
-                    value={peerId}
-                    onChange={(e) => setPeerId(e.target.value)}
-                    placeholder="e.g., player-123"
-                  />
-                  {sessions.length > 0 && (
-                    <div className="topic-list">
-                      {sessions.map((s) => (
-                        <button
-                          key={s.code}
-                          className="topic-item"
-                          onClick={() => setPeerId(s.peerId)}
-                        >
-                          {s.peerId}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {method === 'connection-id' && (
-                <div className="form-group">
-                  <label>Connection ID {action === 'create' && '(optional)'}</label>
-                  <input
-                    type="text"
-                    value={connectionId}
-                    onChange={(e) => setConnectionId(e.target.value)}
-                    placeholder={action === 'create' ? 'Auto-generated if empty' : 'e.g., meeting-123'}
-                    autoFocus={action === 'join'}
-                  />
-                </div>
-              )}
-
-              <div className="button-row">
-                <button className="back-button" onClick={() => setStep(2)}>← Back</button>
-                <button
-                  className="primary-button"
-                  onClick={handleConnect}
-                  disabled={
-                    connectionStatus === 'connecting' ||
-                    (method === 'topic' && !topic) ||
-                    (method === 'peer-id' && (!topic || !peerId)) ||
-                    (method === 'connection-id' && action === 'join' && !connectionId)
-                  }
-                >
-                  {connectionStatus === 'connecting' ? 'Connecting...' : 'Connect'}
-                </button>
-              </div>
-
-              {qrCodeUrl && connectionStatus === 'connecting' && action === 'create' && (
-                <div className="qr-code-container">
-                  <p className="qr-label">Scan to connect:</p>
-                  <img src={qrCodeUrl} alt="Connection QR Code" className="qr-code" />
-                  <p className="connection-id-display">{currentConnectionId}</p>
-                </div>
-              )}
-            </div>
-          </div>
+          <ConnectionForm
+            action={action}
+            method={method}
+            topic={topic}
+            setTopic={setTopic}
+            connectionId={connectionId}
+            setConnectionId={setConnectionId}
+            peerId={peerId}
+            setPeerId={setPeerId}
+            topics={topics}
+            sessions={sessions}
+            connectionStatus={connectionStatus}
+            qrCodeUrl={qrCodeUrl}
+            currentConnectionId={currentConnectionId}
+            onConnect={handleConnect}
+            onBack={() => setStep(2)}
+            onTopicSelect={setTopic}
+            onDiscoverPeers={discoverPeers}
+          />
         )}
 
         {step === 4 && (
-          <div className="chat-container">
-            <div className="chat-header">
-              <div>
-                <h2>Connected</h2>
-                <p className="connection-details">
-                  Peer: {connectedPeer || 'Unknown'} • ID: {currentConnectionId}
-                </p>
-              </div>
-              <button className="disconnect-button" onClick={reset}>Disconnect</button>
-            </div>
-
-            {qrCodeUrl && connectionStatus === 'connecting' && (
-              <div className="qr-code-container">
-                <p className="qr-label">Scan to connect:</p>
-                <img src={qrCodeUrl} alt="Connection QR Code" className="qr-code" />
-                <p className="connection-id-display">{currentConnectionId}</p>
-              </div>
-            )}
-
-            <div className="messages">
-              {messages.length === 0 ? (
-                <p className="empty">No messages yet. Start chatting!</p>
-              ) : (
-                messages.map((msg, idx) => (
-                  <div key={idx} className={`message ${msg.type}`}>
-                    {msg.messageType === 'text' ? (
-                      <div className="message-text">{msg.text}</div>
-                    ) : (
-                      <div className="message-file">
-                        <div className="file-icon">📎</div>
-                        <div className="file-info">
-                          <div className="file-name">{msg.file.name}</div>
-                          <div className="file-size">{(msg.file.size / 1024).toFixed(2)} KB</div>
-                        </div>
-                        <button
-                          className="file-download"
-                          onClick={() => downloadFile(msg.file)}
-                        >
-                          Download
-                        </button>
-                      </div>
-                    )}
-                    <div className="message-time">{msg.timestamp.toLocaleTimeString()}</div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <div className="message-input">
-              <input
-                ref={fileInputRef}
-                type="file"
-                onChange={handleFileSelect}
-                style={{ display: 'none' }}
-              />
-              <button
-                className="file-button"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={!channelReady}
-                title="Send file"
-              >
-                📎
-              </button>
-              <input
-                type="text"
-                value={messageInput}
-                onChange={(e) => setMessageInput(e.target.value)}
-                onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
-                placeholder="Type a message..."
-                disabled={!channelReady}
-              />
-              <button
-                onClick={sendMessage}
-                disabled={!channelReady}
-              >
-                Send
-              </button>
-            </div>
-
-            {logs.length > 0 && (
-              <details className="logs">
-                <summary>Activity Log ({logs.length})</summary>
-                <div className="log-entries">
-                  {logs.map((log, idx) => (
-                    <div key={idx} className={`log-entry ${log.type}`}>
-                      [{log.timestamp}] {log.message}
-                    </div>
-                  ))}
-                </div>
-              </details>
-            )}
-          </div>
+          <ChatView
+            connectedPeer={connectedPeer}
+            currentConnectionId={currentConnectionId}
+            messages={messages}
+            messageInput={messageInput}
+            setMessageInput={setMessageInput}
+            channelReady={channelReady}
+            logs={logs}
+            fileUploadProgress={fileUploadProgress}
+            onSendMessage={sendMessage}
+            onFileSelect={handleFileSelect}
+            onDisconnect={reset}
+            onDownloadFile={downloadFile}
+            onCancelUpload={cancelFileUpload}
+          />
         )}
 
         <div className="peer-id-badge">Your Peer ID: {rdv.peerId}</div>
