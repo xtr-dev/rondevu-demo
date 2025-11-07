@@ -3,7 +3,7 @@ import QRScanner from './QRScanner';
 function ActionSelector({ action, onSelectAction, onScanComplete, onScanCancel, log }) {
   return (
     <div className="step-container">
-      <h2>Choose Action</h2>
+      <h2>Chat Demo</h2>
       <div className="button-grid button-grid-three">
         <button
           className="action-button"
