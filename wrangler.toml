@@ -1,0 +1,10 @@
+name = "rondevu-demo"
+compatibility_date = "2024-01-01"
+
+pages_build_output_dir = "dist"
+
+[env.production]
+name = "rondevu-demo"
+
+[env.production.vars]
+# No environment variables needed for static site
