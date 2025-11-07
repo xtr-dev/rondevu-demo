@@ -18,10 +18,7 @@ Experience how easy WebRTC peer discovery can be with Rondevu's three connection
 - **Real WebRTC** - Actual P2P connections using RTCPeerConnection (not simulated!)
 - **P2P Data Channel** - Direct peer-to-peer chat without server relay
 - **Peer Discovery** - Browse topics and discover available peers
-- **ICE Candidate Exchange** - Automatic NAT traversal using STUN servers
 - **Real-time Chat** - Send and receive messages over WebRTC data channel
-- **Connection Stats** - Monitor RTT, bytes sent/received in real-time
-- **Connection Status** - Live connection state indicators
 - **Activity Log** - Monitor all API and WebRTC events
 
 ### Quick Start
