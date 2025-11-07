@@ -142,18 +142,35 @@ function App() {
       log('Connecting...', 'info');
 
       let connection;
+      let connId;
 
       if (action === 'create') {
         if (method === 'connection-id') {
-          const id = connectionId || `conn-${Date.now()}`;
-          connection = await rdv.create(id, topic || 'default');
-          setCurrentConnectionId(id);
-          log(`Created connection: ${id}`, 'success');
+          connId = connectionId || `conn-${Date.now()}`;
+          connection = await rdv.create(connId, topic || 'default');
+          setCurrentConnectionId(connId);
+          log(`Created connection: ${connId}`, 'success');
         } else {
-          const id = `conn-${Date.now()}`;
-          connection = await rdv.create(id, topic);
-          setCurrentConnectionId(id);
-          log(`Created connection: ${id}`, 'success');
+          connId = `conn-${Date.now()}`;
+          connection = await rdv.create(connId, topic);
+          setCurrentConnectionId(connId);
+          log(`Created connection: ${connId}`, 'success');
+        }
+
+        // Generate QR code if creating a connection
+        try {
+          const qrUrl = await QRCode.toDataURL(connId, {
+            width: 256,
+            margin: 2,
+            color: {
+              dark: '#667eea',
+              light: '#ffffff'
+            }
+          });
+          setQrCodeUrl(qrUrl);
+          log('QR code generated', 'success');
+        } catch (err) {
+          log(`QR code generation error: ${err.message}`, 'error');
         }
       } else {
         if (method === 'topic') {
@@ -172,23 +189,6 @@ function App() {
 
       setConnectedPeer(connection.remotePeerId || 'Waiting...');
       setupConnection(connection);
-
-      // Generate QR code if creating a connection
-      if (action === 'create' && currentConnectionId) {
-        try {
-          const qrUrl = await QRCode.toDataURL(currentConnectionId, {
-            width: 256,
-            margin: 2,
-            color: {
-              dark: '#667eea',
-              light: '#ffffff'
-            }
-          });
-          setQrCodeUrl(qrUrl);
-        } catch (err) {
-          log(`QR code generation error: ${err.message}`, 'error');
-        }
-      }
     } catch (error) {
       log(`Error: ${error.message}`, 'error');
       setConnectionStatus('disconnected');
@@ -207,7 +207,20 @@ function App() {
         return;
       }
 
-      const selectedDeviceId = videoInputDevices[0].deviceId;
+      // Prefer back camera (environment-facing)
+      let selectedDeviceId = videoInputDevices[0].deviceId;
+      const backCamera = videoInputDevices.find(device =>
+        device.label.toLowerCase().includes('back') ||
+        device.label.toLowerCase().includes('rear') ||
+        device.label.toLowerCase().includes('environment')
+      );
+
+      if (backCamera) {
+        selectedDeviceId = backCamera.deviceId;
+        log('Using back camera', 'info');
+      } else {
+        log('Back camera not found, using default', 'info');
+      }
 
       scannerRef.current.decodeFromVideoDevice(
         selectedDeviceId,
@@ -648,6 +661,14 @@ function App() {
                   {connectionStatus === 'connecting' ? 'Connecting...' : 'Connect'}
                 </button>
               </div>
+
+              {qrCodeUrl && connectionStatus === 'connecting' && action === 'create' && (
+                <div className="qr-code-container">
+                  <p className="qr-label">Scan to connect:</p>
+                  <img src={qrCodeUrl} alt="Connection QR Code" className="qr-code" />
+                  <p className="connection-id-display">{currentConnectionId}</p>
+                </div>
+              )}
             </div>
           </div>
         )}
