@@ -213,13 +213,6 @@ npx wrangler pages deploy dist --project-name=rondevu-demo
 4. Set output directory: `dist`
 5. Deploy automatically on every push!
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions including:
-- Git integration setup
-- Wrangler CLI deployment
-- Custom domain configuration
-- Environment variables
-- Branch preview deployments
-
 ### License
 
 MIT
