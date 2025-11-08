@@ -26,9 +26,14 @@ const client = new RondevuClient({
   baseUrl: 'https://rondevu.xtrdev.workers.dev'
 });
 
-// Generate a random 6-digit hex string
+// Generate a random 6-digit string
 function generateConnectionId() {
-  return Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase();
+  const chars = '23456789abcdefghjkmnopqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ';
+  let id = '';
+  for (let i = 0; i < 6; i++) {
+    id += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return id;
 }
 
 function App() {
