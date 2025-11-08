@@ -26,6 +26,11 @@ const client = new RondevuClient({
   baseUrl: 'https://rondevu.xtrdev.workers.dev'
 });
 
+// Generate a random 6-digit hex string
+function generateConnectionId() {
+  return Math.floor(Math.random() * 0xFFFFFF).toString(16).padStart(6, '0').toUpperCase();
+}
+
 function App() {
   // Step-based state
   const [step, setStep] = useState(1); // 1: action, 2: method, 3: details, 4: connected
@@ -149,12 +154,12 @@ function App() {
 
       if (action === 'create') {
         if (method === 'connection-id') {
-          connId = connectionId || `conn-${Date.now()}`;
+          connId = connectionId || generateConnectionId();
           connection = await rdv.create(connId, topic || 'default');
           setCurrentConnectionId(connId);
           log(`Created connection: ${connId}`, 'success');
         } else {
-          connId = `conn-${Date.now()}`;
+          connId = generateConnectionId();
           connection = await rdv.create(connId, topic);
           setCurrentConnectionId(connId);
           log(`Created connection: ${connId}`, 'success');
