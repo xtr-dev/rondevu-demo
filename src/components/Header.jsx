@@ -3,7 +3,7 @@ function Header() {
     <header className="header">
       <div className="header-content">
         <h1>Rondevu</h1>
-        <p className="tagline">Meet WebRTC peers by topic, peer ID, or connection ID</p>
+        <p className="tagline">Simple WebRTC peer signaling and discovery. Meet peers by topic, peer ID, or connection ID.</p>
         <div className="header-links">
           <a href="https://github.com/xtr-dev/rondevu-client" target="_blank" rel="noopener noreferrer">
             <svg className="github-icon" viewBox="0 0 16 16" width="16" height="16" fill="currentColor">
