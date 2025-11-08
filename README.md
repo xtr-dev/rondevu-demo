@@ -1,6 +1,14 @@
 # Rondevu
 
-🎯 Meet WebRTC peers by topic, by peer ID, or by connection ID.
+🎯 **Simple WebRTC peer signaling and discovery**
+
+Meet peers by topic, by peer ID, or by connection ID.
+
+**Related repositories:**
+- [rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server
+- [rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library
+
+---
 
 ## Rondevu Demo
 
