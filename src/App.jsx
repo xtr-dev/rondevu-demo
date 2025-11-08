@@ -60,6 +60,10 @@ function App() {
   const [channelReady, setChannelReady] = useState(false);
   const [fileUploadProgress, setFileUploadProgress] = useState(null);
 
+  // Version state
+  const [demoVersion, setDemoVersion] = useState('unknown');
+  const [serverVersion, setServerVersion] = useState('unknown');
+
   const connectionRef = useRef(null);
   const dataChannelRef = useRef(null);
   const fileTransfersRef = useRef(new Map()); // Track ongoing file transfers
@@ -68,11 +72,25 @@ function App() {
   useEffect(() => {
     log('Demo initialized', 'info');
     loadTopics();
+    loadVersions();
   }, []);
 
   const log = (message, type = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [...prev, { message, type, timestamp }]);
+  };
+
+  const loadVersions = async () => {
+    // Get demo version from build environment
+    setDemoVersion(import.meta.env.VITE_VERSION || 'unknown');
+
+    // Get server version from API
+    try {
+      const { version } = await client.getVersion();
+      setServerVersion(version);
+    } catch (error) {
+      log(`Error loading server version: ${error.message}`, 'error');
+    }
   };
 
   const loadTopics = async () => {
@@ -518,9 +536,14 @@ function App() {
       </main>
 
       <footer className="footer">
-        <a href="https://ronde.vu" target="_blank" rel="noopener noreferrer">
-          ronde.vu
-        </a>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem', alignItems: 'center' }}>
+          <a href="https://ronde.vu" target="_blank" rel="noopener noreferrer">
+            ronde.vu
+          </a>
+          <div style={{ fontSize: '0.75rem', color: '#888' }}>
+            Demo: {demoVersion} | Server: {serverVersion}
+          </div>
+        </div>
       </footer>
     </div>
   );
