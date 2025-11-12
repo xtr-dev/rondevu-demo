@@ -123,7 +123,7 @@ The easiest way to test:
 
 ### Server Configuration
 
-This demo connects to: `https://rondevu.xtrdev.workers.dev`
+This demo connects to: `https://api.ronde.vu`
 
 To use a different server, modify the `baseUrl` in `src/main.js`:
 

@@ -6,9 +6,10 @@ import ActionSelector from './components/ActionSelector';
 import MethodSelector from './components/MethodSelector';
 import ConnectionForm from './components/ConnectionForm';
 import ChatView from './components/ChatView';
+import TopicsList from './components/TopicsList';
 
 const rdv = new Rondevu({
-  baseUrl: 'https://rondevu.xtrdev.workers.dev',
+  baseUrl: 'https://api.ronde.vu',
   rtcConfig: {
     iceServers: [
       { urls: 'stun:stun.l.google.com:19302' },
@@ -59,6 +60,9 @@ function App() {
   // Version state
   const [demoVersion, setDemoVersion] = useState('unknown');
   const [serverVersion, setServerVersion] = useState('unknown');
+
+  // Topics modal state
+  const [showTopicsList, setShowTopicsList] = useState(false);
 
   const connectionRef = useRef(null);
   const dataChannelRef = useRef(null);
@@ -529,6 +533,24 @@ function App() {
         )}
 
         <div className="peer-id-badge">Your Peer ID: {rdv.peerId}</div>
+
+        {/* Floating button to view topics */}
+        {step !== 4 && (
+          <button
+            className="view-topics-button"
+            onClick={() => setShowTopicsList(true)}
+          >
+            📊 View Topics
+          </button>
+        )}
+
+        {/* Topics modal */}
+        {showTopicsList && (
+          <TopicsList
+            rdv={rdv}
+            onClose={() => setShowTopicsList(false)}
+          />
+        )}
       </main>
 
       <footer className="footer">
