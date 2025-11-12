@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Rondevu, RondevuClient } from '@xtr-dev/rondevu-client';
+import { Rondevu } from '@xtr-dev/rondevu-client';
 import QRCode from 'qrcode';
 import Header from './components/Header';
 import ActionSelector from './components/ActionSelector';
@@ -20,10 +20,6 @@ const rdv = new Rondevu({
       }
     ]
   }
-});
-
-const client = new RondevuClient({
-  baseUrl: 'https://rondevu.xtrdev.workers.dev'
 });
 
 // Generate a random 6-digit string
@@ -86,7 +82,7 @@ function App() {
 
     // Get server version from API
     try {
-      const { version } = await client.getVersion();
+      const { version } = await rdv.api.getVersion();
       setServerVersion(version);
     } catch (error) {
       log(`Error loading server version: ${error.message}`, 'error');
@@ -95,7 +91,7 @@ function App() {
 
   const loadTopics = async () => {
     try {
-      const { topics } = await client.listTopics();
+      const { topics } = await rdv.api.listTopics();
       setTopics(topics);
     } catch (error) {
       log(`Error loading topics: ${error.message}`, 'error');
@@ -104,7 +100,7 @@ function App() {
 
   const discoverPeers = async (topicName) => {
     try {
-      const { sessions: foundSessions } = await client.listSessions(topicName);
+      const { sessions: foundSessions } = await rdv.api.listSessions(topicName);
       const otherSessions = foundSessions.filter(s => s.peerId !== rdv.peerId);
       setSessions(otherSessions);
     } catch (error) {

@@ -128,9 +128,12 @@ This demo connects to: `https://rondevu.xtrdev.workers.dev`
 To use a different server, modify the `baseUrl` in `src/main.js`:
 
 ```javascript
-const client = new RondevuClient({
+const rdv = new Rondevu({
   baseUrl: 'https://your-server.com'
 });
+
+// Access the API for low-level operations
+rdv.api.listTopics();
 ```
 
 ### Technologies
