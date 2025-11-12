@@ -3,10 +3,8 @@ import { Rondevu } from '@xtr-dev/rondevu-client';
 import QRCode from 'qrcode';
 import Header from './components/Header';
 import ActionSelector from './components/ActionSelector';
-import MethodSelector from './components/MethodSelector';
 import ConnectionForm from './components/ConnectionForm';
 import ChatView from './components/ChatView';
-import TopicsList from './components/TopicsList';
 
 const rdv = new Rondevu({
   baseUrl: 'https://api.ronde.vu',
@@ -35,17 +33,12 @@ function generateConnectionId() {
 
 function App() {
   // Step-based state
-  const [step, setStep] = useState(1); // 1: action, 2: method, 3: details, 4: connected
-  const [action, setAction] = useState(null); // 'create', 'join', or 'scan'
-  const [method, setMethod] = useState(null); // 'topic', 'peer-id', 'connection-id'
+  const [step, setStep] = useState(1); // 1: action, 2: details, 3: connected
+  const [action, setAction] = useState(null); // 'create' or 'connect'
   const [qrCodeUrl, setQrCodeUrl] = useState('');
 
   // Connection state
-  const [topic, setTopic] = useState('');
   const [connectionId, setConnectionId] = useState('');
-  const [peerId, setPeerId] = useState('');
-  const [topics, setTopics] = useState([]);
-  const [sessions, setSessions] = useState([]);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [connectedPeer, setConnectedPeer] = useState(null);
   const [currentConnectionId, setCurrentConnectionId] = useState(null);
@@ -61,9 +54,6 @@ function App() {
   const [demoVersion, setDemoVersion] = useState('unknown');
   const [serverVersion, setServerVersion] = useState('unknown');
 
-  // Topics modal state
-  const [showTopicsList, setShowTopicsList] = useState(false);
-
   const connectionRef = useRef(null);
   const dataChannelRef = useRef(null);
   const fileTransfersRef = useRef(new Map()); // Track ongoing file transfers
@@ -71,7 +61,6 @@ function App() {
 
   useEffect(() => {
     log('Demo initialized', 'info');
-    loadTopics();
     loadVersions();
   }, []);
 
@@ -93,32 +82,13 @@ function App() {
     }
   };
 
-  const loadTopics = async () => {
-    try {
-      const { topics } = await rdv.api.listTopics();
-      setTopics(topics);
-    } catch (error) {
-      log(`Error loading topics: ${error.message}`, 'error');
-    }
-  };
-
-  const discoverPeers = async (topicName) => {
-    try {
-      const { sessions: foundSessions } = await rdv.api.listSessions(topicName);
-      const otherSessions = foundSessions.filter(s => s.peerId !== rdv.peerId);
-      setSessions(otherSessions);
-    } catch (error) {
-      log(`Error discovering peers: ${error.message}`, 'error');
-    }
-  };
-
   const setupConnection = (connection) => {
     connectionRef.current = connection;
 
     connection.on('connect', () => {
       log('✅ Connected!', 'success');
       setConnectionStatus('connected');
-      setStep(4);
+      setStep(3);
 
       const channel = connection.dataChannel('chat');
       setupDataChannel(channel);
@@ -176,17 +146,10 @@ function App() {
       let connId;
 
       if (action === 'create') {
-        if (method === 'connection-id') {
-          connId = connectionId || generateConnectionId();
-          connection = await rdv.create(connId, topic || 'default');
-          setCurrentConnectionId(connId);
-          log(`Created connection: ${connId}`, 'success');
-        } else {
-          connId = generateConnectionId();
-          connection = await rdv.create(connId, topic);
-          setCurrentConnectionId(connId);
-          log(`Created connection: ${connId}`, 'success');
-        }
+        connId = connectionId || generateConnectionId();
+        connection = await rdv.create(connId);
+        setCurrentConnectionId(connId);
+        log(`Created connection: ${connId}`, 'success');
 
         // Generate QR code if creating a connection
         try {
@@ -204,18 +167,8 @@ function App() {
           log(`QR code generation error: ${err.message}`, 'error');
         }
       } else {
-        if (method === 'topic') {
-          connection = await rdv.join(topic);
-          setCurrentConnectionId(connection.id);
-        } else if (method === 'peer-id') {
-          connection = await rdv.join(topic, {
-            filter: (s) => s.peerId === peerId
-          });
-          setCurrentConnectionId(connection.id);
-        } else if (method === 'connection-id') {
-          connection = await rdv.connect(connectionId);
-          setCurrentConnectionId(connectionId);
-        }
+        connection = await rdv.connect(connectionId);
+        setCurrentConnectionId(connectionId);
       }
 
       setConnectedPeer(connection.remotePeerId || 'Waiting...');
@@ -435,11 +388,7 @@ function App() {
     }
     setStep(1);
     setAction(null);
-    setMethod(null);
-    setTopic('');
     setConnectionId('');
-    setPeerId('');
-    setSessions([]);
     setConnectionStatus('disconnected');
     setConnectedPeer(null);
     setCurrentConnectionId(null);
@@ -452,9 +401,8 @@ function App() {
 
   const handleScanComplete = (scannedId) => {
     setConnectionId(scannedId);
-    setAction('join');
-    setMethod('connection-id');
-    setStep(3);
+    setAction('connect');
+    setStep(2);
   };
 
   const handleScanCancel = () => {
@@ -482,39 +430,19 @@ function App() {
         )}
 
         {step === 2 && (
-          <MethodSelector
+          <ConnectionForm
             action={action}
-            onSelectMethod={(m) => {
-              setMethod(m);
-              setStep(3);
-            }}
+            connectionId={connectionId}
+            setConnectionId={setConnectionId}
+            connectionStatus={connectionStatus}
+            qrCodeUrl={qrCodeUrl}
+            currentConnectionId={currentConnectionId}
+            onConnect={handleConnect}
             onBack={() => setStep(1)}
           />
         )}
 
         {step === 3 && (
-          <ConnectionForm
-            action={action}
-            method={method}
-            topic={topic}
-            setTopic={setTopic}
-            connectionId={connectionId}
-            setConnectionId={setConnectionId}
-            peerId={peerId}
-            setPeerId={setPeerId}
-            topics={topics}
-            sessions={sessions}
-            connectionStatus={connectionStatus}
-            qrCodeUrl={qrCodeUrl}
-            currentConnectionId={currentConnectionId}
-            onConnect={handleConnect}
-            onBack={() => setStep(2)}
-            onTopicSelect={setTopic}
-            onDiscoverPeers={discoverPeers}
-          />
-        )}
-
-        {step === 4 && (
           <ChatView
             connectedPeer={connectedPeer}
             currentConnectionId={currentConnectionId}
@@ -533,24 +461,6 @@ function App() {
         )}
 
         <div className="peer-id-badge">Your Peer ID: {rdv.peerId}</div>
-
-        {/* Floating button to view topics */}
-        {step !== 4 && (
-          <button
-            className="view-topics-button"
-            onClick={() => setShowTopicsList(true)}
-          >
-            📊 View Topics
-          </button>
-        )}
-
-        {/* Topics modal */}
-        {showTopicsList && (
-          <TopicsList
-            rdv={rdv}
-            onClose={() => setShowTopicsList(false)}
-          />
-        )}
       </main>
 
       <footer className="footer">

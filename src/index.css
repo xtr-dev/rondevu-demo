@@ -162,6 +162,12 @@ body {
   font-size: 0.95rem;
 }
 
+.help-text {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: #6c757d;
+}
+
 input[type="text"] {
   width: 100%;
   padding: 12px 16px;
