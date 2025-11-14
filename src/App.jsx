@@ -15,17 +15,7 @@ const RTC_CONFIG = {
       credential: "QPjJzPau1Ng5S0dq",
     },
     {
-      urls: "turn:standard.relay.metered.ca:80?transport=tcp",
-      username: "e03a51621b4f11ffbed3addd",
-      credential: "QPjJzPau1Ng5S0dq",
-    },
-    {
       urls: "turn:standard.relay.metered.ca:443",
-      username: "e03a51621b4f11ffbed3addd",
-      credential: "QPjJzPau1Ng5S0dq",
-    },
-    {
-      urls: "turns:standard.relay.metered.ca:443?transport=tcp",
       username: "e03a51621b4f11ffbed3addd",
       credential: "QPjJzPau1Ng5S0dq",
     },
