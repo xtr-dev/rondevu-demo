@@ -46,10 +46,26 @@ export default function App() {
   useEffect(() => {
     const saved = localStorage.getItem('rondevu-credentials');
     if (saved) {
-      const creds = JSON.parse(saved);
-      setCredentials(creds);
-      setClient(new Rondevu({baseUrl: API_URL, credentials: creds}));
-      setStatus('Registered (from storage)');
+      try {
+        const creds = JSON.parse(saved);
+        // Validate credentials have required fields
+        if (creds && creds.peerId && creds.secret) {
+          setCredentials(creds);
+          setClient(new Rondevu({baseUrl: API_URL, credentials: creds}));
+          setStatus('Registered (from storage)');
+        } else {
+          // Invalid credentials, remove them
+          localStorage.removeItem('rondevu-credentials');
+          setClient(new Rondevu({baseUrl: API_URL}));
+          setStatus('Not registered');
+        }
+      } catch (err) {
+        // Corrupted credentials, remove them
+        console.error('Failed to load credentials:', err);
+        localStorage.removeItem('rondevu-credentials');
+        setClient(new Rondevu({baseUrl: API_URL}));
+        setStatus('Not registered');
+      }
     } else {
       setClient(new Rondevu({baseUrl: API_URL}));
     }
@@ -137,6 +153,11 @@ export default function App() {
   // Discover peers
   const handleDiscoverPeers = async () => {
     if (!client) return;
+
+    if (!client.isAuthenticated()) {
+      toast.error('Please register first!');
+      return;
+    }
 
     try {
       const offers = await client.offers.findByTopic(searchTopic.trim(), {limit: 50});
