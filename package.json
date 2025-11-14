@@ -1,7 +1,7 @@
 {
   "name": "rondevu-demo",
-  "version": "0.3.2",
-  "description": "Demo application for Rondevu peer signaling and discovery",
+  "version": "0.4.0",
+  "description": "Demo application for Rondevu topic-based peer discovery and signaling",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,11 +10,12 @@
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name=rondevu-demo"
   },
   "dependencies": {
-    "@xtr-dev/rondevu-client": "^0.3.2",
+    "@xtr-dev/rondevu-client": "^0.3.5",
     "@zxing/library": "^0.21.3",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
-    "react-dom": "^18.2.0"
+    "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.6.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.0",

@@ -1,51 +1,52 @@
-# Rondevu
+# Rondevu Demo
 
-🎯 **Simple WebRTC peer signaling and discovery**
+🎯 **Interactive WebRTC peer discovery and connection demo**
 
-Meet peers by topic, by peer ID, or by connection ID.
+Experience topic-based peer discovery and WebRTC connections using the Rondevu signaling platform.
 
 **Related repositories:**
-- [rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server
+- [rondevu-server](https://github.com/xtr-dev/rondevu) - HTTP signaling server
 - [rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library
 
 ---
 
-## Rondevu Demo
+## Overview
 
-**Interactive demo showcasing three ways to connect WebRTC peers.**
+This demo showcases the complete Rondevu workflow:
 
-Experience how easy WebRTC peer discovery can be with Rondevu's three connection methods:
+1. **Register** - Get peer credentials (automatically saved)
+2. **Create Offers** - Advertise your WebRTC connection on topics
+3. **Discover Peers** - Find other peers by topic
+4. **Connect** - Establish direct P2P WebRTC connections
+5. **Chat** - Send messages over WebRTC data channels
 
-🎯 **Connect by Topic** - Auto-discover and join any available peer  
-👤 **Connect by Peer ID** - Filter and connect to specific peers  
-🔗 **Connect by Connection ID** - Share a code and connect directly  
+### Key Features
 
-### Features
+- **Topic-Based Discovery** - Find peers by shared topics (like torrent infohashes)
+- **Real P2P Connections** - Actual WebRTC data channels (not simulated)
+- **Connection Manager** - Uses high-level `RondevuConnection` API (no manual WebRTC plumbing)
+- **Persistent Credentials** - Saves authentication to localStorage
+- **Topics Browser** - Browse all active topics and peer counts
+- **Multiple Connections** - Support multiple simultaneous peer connections
+- **Real-time Chat** - Direct peer-to-peer messaging
 
-- **Three Connection Methods** - Experience topic discovery, peer filtering, and direct connection
-- **Real WebRTC** - Actual P2P connections using RTCPeerConnection (not simulated!)
-- **P2P Data Channel** - Direct peer-to-peer chat without server relay
-- **Peer Discovery** - Browse topics and discover available peers
-- **Real-time Chat** - Send and receive messages over WebRTC data channel
-- **Activity Log** - Monitor all API and WebRTC events
+## Quick Start
 
-### Quick Start
-
-#### Installation
+### Installation
 
 ```bash
 npm install
 ```
 
-#### Development
+### Development
 
 ```bash
 npm run dev
 ```
 
-This will start the Vite dev server at `http://localhost:5173`
+This starts the Vite dev server at `http://localhost:5173`
 
-#### Build for Production
+### Build for Production
 
 ```bash
 npm run build
@@ -53,153 +54,145 @@ npm run build
 
 The built files will be in the `dist/` directory.
 
-#### Preview Production Build
+### Preview Production Build
 
 ```bash
 npm run preview
 ```
 
-### Three Ways to Connect
+## How to Use
 
-This demo demonstrates all three Rondevu connection methods:
+### Step 1: Register (One-time)
 
-#### 1️⃣ Join Topic (Auto-Discovery)
+The demo automatically registers you when you first visit. Your credentials are saved in localStorage for future visits.
 
-**Easiest method** - Just enter a topic and auto-connect to first available peer:
+### Step 2: Create an Offer
 
-1. Enter a topic name in the "Join Topic" section (e.g., "demo-room")
-2. Click "Join Topic"
-3. Rondevu finds the first available peer and connects automatically
-4. Start chatting!
+1. Go to the "Create Offer" tab
+2. Enter one or more topics (comma-separated), e.g., `demo-room, testing`
+3. Click "Create Offer"
+4. Your offer is now advertised on those topics
 
-**Best for:** Quick matching, joining any available game/chat
+**Share the topic name with peers you want to connect with!**
 
----
+### Step 3: Discover and Connect (Other Peer)
 
-#### 2️⃣ Discover Peers (Filter by Peer ID)
+1. Go to the "Discover Offers" tab
+2. Enter the same topic (e.g., `demo-room`)
+3. Click "Discover Offers"
+4. See available peers and their offers
+5. Click "Answer Offer" to connect
 
-**Connect to specific peers** - Browse and select which peer to connect to:
+### Step 4: Chat
 
-1. Enter a topic name (e.g., "demo-room")
-2. Click "Discover in [topic]" to list all available peers
-3. See each peer's ID in the list
-4. Click "Connect" on the specific peer you want to talk to
-5. Start chatting!
+1. Once connected, go to the "Chat" tab
+2. Select a connection from the dropdown
+3. Type messages and hit Enter or click Send
+4. Messages are sent **directly peer-to-peer** via WebRTC
 
-**Best for:** Connecting to friends, teammates, or specific users
+### Browse Topics
 
----
+Click the "Topics" tab to:
+- See all active topics
+- View peer counts for each topic
+- Quick-discover by clicking a topic
 
-#### 3️⃣ Create/Connect by ID (Direct Connection)
-
-**Share a connection code** - Like sharing a meeting link:
-
-**To create:**
-1. Enter a topic name (e.g., "meetings")
-2. Enter a custom Connection ID (e.g., "my-meeting-123") or leave blank for auto-generation
-3. Click "Create Connection"
-4. **Share the Connection ID** with the person you want to connect with
-
-**To join:**
-1. Get the Connection ID from your friend (e.g., "my-meeting-123")
-2. Enter it in the "Connect by ID" section
-3. Click "Connect to ID"
-4. Start chatting!
-
-**Best for:** Meeting rooms, QR code connections, invitation-based sessions
-
-#### Testing Locally
+## Testing Locally
 
 The easiest way to test:
-1. Open the demo in **two different browser windows** (or tabs)
-2. In window 1: Create an offer with topic "test-room"
-3. In window 2: Discover peers in "test-room" and click Connect
-4. Watch the connection establish and start chatting!
 
-#### Browse Topics
+1. Open the demo in **two browser windows** (or tabs)
+2. **Window 1**: Create an offer with topic `test-room`
+3. **Window 2**: Discover offers in `test-room` and answer
+4. Switch to Chat tab in both windows
+5. Start chatting peer-to-peer!
 
-- Click "Refresh Topics" to see all active topics
-- Click on any topic to auto-fill the discovery form
+## Technical Implementation
 
-### Server Configuration
+### Connection Manager
 
-This demo connects to: `https://api.ronde.vu`
-
-To use a different server, modify the `baseUrl` in `src/main.js`:
+This demo uses the high-level `RondevuConnection` class which abstracts all WebRTC complexity:
 
 ```javascript
-const rdv = new Rondevu({
-  baseUrl: 'https://your-server.com'
+// Create connection
+const conn = client.createConnection();
+
+// Set up event listeners
+conn.on('connected', () => {
+  console.log('P2P connection established!');
 });
 
-// Access the API for low-level operations
-rdv.api.listTopics();
+conn.on('datachannel', (channel) => {
+  channel.onmessage = (event) => {
+    console.log('Message:', event.data);
+  };
+});
+
+// Create offer
+await conn.createOffer({
+  topics: ['demo-room'],
+  ttl: 300000
+});
+
+// Or answer an offer
+await conn.answer(offerId, offerSdp);
 ```
 
-### Technologies
+The connection manager handles:
+- Offer/answer SDP generation
+- ICE candidate gathering and exchange
+- Automatic polling for answers and candidates
+- Data channel lifecycle
+- Connection state management
+- Event-driven API
 
-- **Vite** - Fast development and build tool
-- **@xtr-dev/rondevu-client** - TypeScript client for Rondevu API
-- **Vanilla JavaScript** - No framework dependencies
+### What Happens Under the Hood
 
-### API Examples
+1. **Offerer** calls `conn.createOffer()`:
+   - Creates RTCPeerConnection
+   - Generates SDP offer
+   - Creates data channel
+   - Posts offer to Rondevu server
+   - Polls for answers every 2 seconds
 
-The demo showcases all major Rondevu API endpoints:
+2. **Answerer** calls `conn.answer()`:
+   - Creates RTCPeerConnection
+   - Sets remote description (offer SDP)
+   - Generates SDP answer
+   - Posts answer to server
+   - Polls for ICE candidates every 1 second
 
-- `GET /` - List all topics
-- `GET /:topic/sessions` - Discover peers in a topic
-- `POST /:topic/offer` - Create a new offer
-- `POST /answer` - Send answer to a peer
-- `POST /poll` - Poll for peer data
-- `GET /health` - Check server health
+3. **ICE Exchange**:
+   - Both peers generate ICE candidates
+   - Candidates are automatically sent to server
+   - Peers poll and receive remote candidates
+   - ICE establishes the direct P2P path
 
-### WebRTC Implementation Details
+4. **Connection Established**:
+   - Data channel opens
+   - Chat messages flow directly between peers
+   - No server relay (true P2P!)
 
-This demo implements a **complete WebRTC peer-to-peer connection** with:
+### Architecture
 
-#### Connection Flow
+- **Frontend**: React + Vite
+- **Signaling**: Rondevu server (Cloudflare Workers + D1)
+- **Client**: @xtr-dev/rondevu-client (TypeScript library)
+- **WebRTC**: RTCPeerConnection with Google STUN servers
 
-1. **Offerer** creates an `RTCPeerConnection` and generates an SDP offer
-2. Offer is sent to the Rondevu signaling server via `POST /:topic/offer`
-3. **Answerer** discovers the offer via `GET /:topic/sessions`
-4. Answerer creates an `RTCPeerConnection`, sets the remote offer, and generates an SDP answer
-5. Answer is sent via `POST /answer`
-6. Both peers generate ICE candidates and send them via `POST /answer` with `candidate` field
-7. Both peers poll via `POST /poll` to receive remote ICE candidates
-8. Once candidates are exchanged, the **direct P2P connection** is established
-9. Data channel opens and chat messages flow **directly between peers**
+## Server Configuration
 
-#### Key Features
+This demo connects to: `https://rondevu.xtrdev.workers.dev`
 
-- **Real RTCPeerConnection** - Not simulated, actual WebRTC
-- **STUN servers** - Google's public STUN servers for NAT traversal
-- **Data Channel** - Named "chat" channel for text messaging
-- **ICE Trickle** - Candidates are sent as they're generated
-- **Automatic Polling** - Polls every 1 second for remote data
-- **Connection States** - Visual indicators for connecting/connected/failed states
-- **Graceful Cleanup** - Properly closes connections and stops polling
+To use a different server, modify `API_URL` in `src/App.jsx`:
 
-#### Technologies
+```javascript
+const API_URL = 'https://your-server.com';
+```
 
-- **RTCPeerConnection API** - Core WebRTC connection
-- **RTCDataChannel API** - Unreliable but fast text messaging
-- **Rondevu Signaling** - SDP and ICE candidate exchange
-- **STUN Protocol** - NAT traversal (stun.l.google.com)
+## Deployment
 
-### Development Notes
-
-- Peer IDs are auto-generated on page load
-- WebRTC connections use **real** RTCPeerConnection (not simulated!)
-- Sessions expire after the server's configured timeout (5 minutes default)
-- The demo is completely client-side (no backend required)
-- Messages are sent P2P - the server only facilitates discovery
-- Works across different browsers and networks (with STUN support)
-
-### Deployment
-
-#### Deploy to Cloudflare Pages
-
-The demo can be easily deployed to Cloudflare Pages (free tier):
+### Deploy to Cloudflare Pages
 
 **Quick Deploy via Wrangler:**
 
@@ -216,7 +209,23 @@ npx wrangler pages deploy dist --project-name=rondevu-demo
 4. Set output directory: `dist`
 5. Deploy automatically on every push!
 
-### License
+## Development Notes
+
+- Credentials are stored in localStorage and persist across sessions
+- Offers expire after 5 minutes by default
+- The connection manager polls automatically (no manual polling needed)
+- Multiple simultaneous connections are supported
+- WebRTC uses Google's public STUN servers for NAT traversal
+- Data channel messages are unreliable but fast (perfect for chat)
+
+## Technologies
+
+- **React** - UI framework
+- **Vite** - Build tool and dev server
+- **@xtr-dev/rondevu-client** - Rondevu client library
+- **RTCPeerConnection** - WebRTC connections
+- **RTCDataChannel** - P2P messaging
+
+## License
 
 MIT
-
