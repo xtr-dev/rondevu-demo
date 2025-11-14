@@ -9,6 +9,11 @@ const RTC_CONFIG = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     {
+      urls: "turn:standard.relay.metered.ca:80",
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
+    {
       urls: "turn:standard.relay.metered.ca:443",
       username: "e03a51621b4f11ffbed3addd",
       credential: "QPjJzPau1Ng5S0dq",
