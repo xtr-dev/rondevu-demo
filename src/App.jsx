@@ -6,9 +6,14 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
+    // Google STUN - reliable and always works
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    // Metered.ca STUN
     {
       urls: "stun:stun.relay.metered.ca:80",
     },
+    // Metered.ca TURN servers (for restrictive NATs)
     {
       urls: "turn:standard.relay.metered.ca:80",
       username: "e03a51621b4f11ffbed3addd",
