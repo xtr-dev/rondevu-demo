@@ -71,6 +71,14 @@ export default function App() {
     }
   }, []);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      // Close all connections when component unmounts
+      myConnections.forEach(c => c.conn?.close());
+    };
+  }, [myConnections]);
+
   // Register
   const handleRegister = async () => {
     if (!client) return;
