@@ -9,6 +9,17 @@ const RTC_CONFIG = {
     // Google STUN servers - reliable and always available
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    // Metered.ca TURN servers for restrictive NATs
+    {
+      urls: [
+        'turn:a.relay.metered.ca:80',
+        'turn:a.relay.metered.ca:80?transport=tcp',
+        'turn:a.relay.metered.ca:443',
+        'turn:a.relay.metered.ca:443?transport=tcp',
+      ],
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
   ],
 };
 
