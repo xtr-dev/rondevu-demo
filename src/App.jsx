@@ -6,13 +6,18 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
     {
-      urls: 'turn:relay1.expressturn.com:3480',
-      username: "ef13B1E5PH265HK1N2",
-      credential: "TTcTPEy3ndxsS0Gp",
+      urls: [
+        "stun:stun.ronde.vu:3478"
+      ]
     },
+    {
+      urls: [
+        "turn:turn.ronde.vu:3478"
+      ],
+      username: "ignored",       // With static auth secret, username is ignored by Coturn
+      credential: "ignored"      // Credential also ignored; long-term shared secret is used server-side
+    }
   ]
 };
 
