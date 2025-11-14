@@ -182,7 +182,7 @@ The connection manager handles:
 
 ## Server Configuration
 
-This demo connects to: `https://rondevu.xtrdev.workers.dev`
+This demo connects to: `https://api.ronde.vu`
 
 To use a different server, modify `API_URL` in `src/App.jsx`:
 
