@@ -9,7 +9,7 @@ const RTC_CONFIG = {
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
     {
-      urls: 'relay1.expressturn.com:3480',
+      urls: 'turn:relay1.expressturn.com:3480',
       username: "ef13B1E5PH265HK1N2",
       credential: "TTcTPEy3ndxsS0Gp",
     },
