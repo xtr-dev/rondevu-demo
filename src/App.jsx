@@ -6,13 +6,13 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    {urls: 'stun:stun.l.google.com:19302'},
-    {urls: 'stun:stun1.l.google.com:19302'},
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
     {
-      urls: 'turn:relay1.expressturn.com:3480',
-      username: 'ef13B1E5PH265HK1N2',
-      credential: 'TTcTPEy3ndxsS0Gp'
-    }
+      urls: "turn:standard.relay.metered.ca:443",
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
   ]
 };
 
