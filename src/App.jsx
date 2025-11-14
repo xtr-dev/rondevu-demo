@@ -6,14 +6,30 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    { urls: 'stun:stun1.l.google.com:19302' },
+    {
+      urls: "stun:stun.relay.metered.ca:80",
+    },
+    {
+      urls: "turn:standard.relay.metered.ca:80",
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
+    {
+      urls: "turn:standard.relay.metered.ca:80?transport=tcp",
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
     {
       urls: "turn:standard.relay.metered.ca:443",
       username: "e03a51621b4f11ffbed3addd",
       credential: "QPjJzPau1Ng5S0dq",
     },
-  ]
+    {
+      urls: "turns:standard.relay.metered.ca:443?transport=tcp",
+      username: "e03a51621b4f11ffbed3addd",
+      credential: "QPjJzPau1Ng5S0dq",
+    },
+  ],
 };
 
 export default function App() {
