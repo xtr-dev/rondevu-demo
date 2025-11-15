@@ -10,7 +10,7 @@ const RTC_CONFIG = {
       urls: ["stun:stun.ronde.vu:3478"]
     },
     {
-      urls: ["turn:turn.ronde.vu:3478"],
+      urls: ["turn:turn.ronde.vu:3478?transport=udp"],
       username: "webrtcuser",
       credential: "supersecretpassword"
     }
