@@ -288,18 +288,12 @@ export default function App() {
     };
   };
 
-  // Add ICE debugging to a connection (without overwriting existing handlers)
+  // Add ICE debugging to a connection
   const addIceLogging = (conn) => {
     const pc = conn['pc']; // Access underlying peer connection for debugging
     if (pc) {
-      // Store original handlers
-      const originalIceCandidate = pc.onicecandidate;
-      const originalGatheringStateChange = pc.onicegatheringstatechange;
-      const originalIceConnectionStateChange = pc.oniceconnectionstatechange;
-      const originalConnectionStateChange = pc.onconnectionstatechange;
-
-      // Wrap handlers to add logging
-      pc.onicecandidate = (event) => {
+      // Add new handlers that don't override existing ones
+      pc.addEventListener('icecandidate', (event) => {
         if (event.candidate) {
           console.log('🧊 ICE candidate gathered:', {
             type: event.candidate.type,
@@ -311,24 +305,19 @@ export default function App() {
         } else {
           console.log('🧊 ICE gathering complete');
         }
-        // Call original handler
-        if (originalIceCandidate) originalIceCandidate.call(pc, event);
-      };
+      });
 
-      pc.onicegatheringstatechange = (event) => {
+      pc.addEventListener('icegatheringstatechange', () => {
         console.log('🧊 ICE gathering state:', pc.iceGatheringState);
-        if (originalGatheringStateChange) originalGatheringStateChange.call(pc, event);
-      };
+      });
 
-      pc.oniceconnectionstatechange = (event) => {
+      pc.addEventListener('iceconnectionstatechange', () => {
         console.log('🧊 ICE connection state:', pc.iceConnectionState);
-        if (originalIceConnectionStateChange) originalIceConnectionStateChange.call(pc, event);
-      };
+      });
 
-      pc.onconnectionstatechange = (event) => {
+      pc.addEventListener('connectionstatechange', () => {
         console.log('🔌 Connection state:', pc.connectionState);
-        if (originalConnectionStateChange) originalConnectionStateChange.call(pc, event);
-      };
+      });
     }
   };
 
