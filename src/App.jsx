@@ -104,6 +104,9 @@ export default function App() {
       // Create connection using the manager
       const conn = client.createConnection(RTC_CONFIG);
 
+      // Add ICE debugging
+      addIceLogging(conn);
+
       // Setup event listeners
       conn.on('connecting', () => {
         updateConnectionStatus(conn.id, 'connecting');
@@ -188,6 +191,9 @@ export default function App() {
       // Create connection using the manager
       const conn = client.createConnection(RTC_CONFIG);
 
+      // Add ICE debugging
+      addIceLogging(conn);
+
       // Setup event listeners
       conn.on('connecting', () => {
         updateConnectionStatus(conn.id, 'connecting');
@@ -246,6 +252,50 @@ export default function App() {
     setMyConnections(prev => prev.map(c =>
       c.id === connId ? {...c, channel} : c
     ));
+  };
+
+  // Add ICE debugging to a connection (without overwriting existing handlers)
+  const addIceLogging = (conn) => {
+    const pc = conn['pc']; // Access underlying peer connection for debugging
+    if (pc) {
+      // Store original handlers
+      const originalIceCandidate = pc.onicecandidate;
+      const originalGatheringStateChange = pc.onicegatheringstatechange;
+      const originalIceConnectionStateChange = pc.oniceconnectionstatechange;
+      const originalConnectionStateChange = pc.onconnectionstatechange;
+
+      // Wrap handlers to add logging
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          console.log('🧊 ICE candidate gathered:', {
+            type: event.candidate.type,
+            protocol: event.candidate.protocol,
+            address: event.candidate.address,
+            port: event.candidate.port,
+            candidate: event.candidate.candidate
+          });
+        } else {
+          console.log('🧊 ICE gathering complete');
+        }
+        // Call original handler
+        if (originalIceCandidate) originalIceCandidate.call(pc, event);
+      };
+
+      pc.onicegatheringstatechange = (event) => {
+        console.log('🧊 ICE gathering state:', pc.iceGatheringState);
+        if (originalGatheringStateChange) originalGatheringStateChange.call(pc, event);
+      };
+
+      pc.oniceconnectionstatechange = (event) => {
+        console.log('🧊 ICE connection state:', pc.iceConnectionState);
+        if (originalIceConnectionStateChange) originalIceConnectionStateChange.call(pc, event);
+      };
+
+      pc.onconnectionstatechange = (event) => {
+        console.log('🔌 Connection state:', pc.connectionState);
+        if (originalConnectionStateChange) originalConnectionStateChange.call(pc, event);
+      };
+    }
   };
 
   // Send message
