@@ -104,7 +104,8 @@ export default function App() {
       // Create connection using the manager
       const conn = client.createConnection(RTC_CONFIG);
 
-      // Add ICE debugging
+      // Add debugging
+      addApiLogging(client);
       addIceLogging(conn);
 
       // Setup event listeners
@@ -191,7 +192,8 @@ export default function App() {
       // Create connection using the manager
       const conn = client.createConnection(RTC_CONFIG);
 
-      // Add ICE debugging
+      // Add debugging
+      addApiLogging(client);
       addIceLogging(conn);
 
       // Setup event listeners
@@ -252,6 +254,26 @@ export default function App() {
     setMyConnections(prev => prev.map(c =>
       c.id === connId ? {...c, channel} : c
     ));
+  };
+
+  // Add API-level ICE candidate logging
+  const addApiLogging = (client) => {
+    const originalAddIceCandidates = client.offers.addIceCandidates.bind(client.offers);
+    const originalGetIceCandidates = client.offers.getIceCandidates.bind(client.offers);
+
+    client.offers.addIceCandidates = async (offerId, candidates) => {
+      console.log(`📤 Sending ${candidates.length} ICE candidate(s) to server for offer ${offerId}`);
+      return originalAddIceCandidates(offerId, candidates);
+    };
+
+    client.offers.getIceCandidates = async (offerId, since) => {
+      const result = await originalGetIceCandidates(offerId, since);
+      console.log(`📥 Received ${result.length} ICE candidate(s) from server for offer ${offerId}, since=${since}`);
+      if (result.length > 0) {
+        console.log(`📥 First candidate:`, result[0]);
+      }
+      return result;
+    };
   };
 
   // Add ICE debugging to a connection (without overwriting existing handlers)
