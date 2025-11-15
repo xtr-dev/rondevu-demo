@@ -6,10 +6,7 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    {
-      urls: "stun:stun.relay.metered.ca:80",
-    },
-    // TCP transport only - VPN blocks UDP relay
+    // TCP transport to TURN server - VPN blocks UDP connections to TURN
     {
       urls: "turn:standard.relay.metered.ca:80?transport=tcp",
       username: "c53a9c971da5e6f3bc959d8d",
@@ -22,7 +19,8 @@ const RTC_CONFIG = {
     },
   ],
   // Force relay to avoid direct connection attempts through VPN
-  iceTransportPolicy: 'relay'
+  iceTransportPolicy: 'relay',
+  iceCandidatePoolSize: 10
 };
 
 export default function App() {
