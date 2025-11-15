@@ -7,12 +7,12 @@ const API_URL = 'https://api.ronde.vu';
 const RTC_CONFIG = {
   iceServers: [
     {
-      urls: ["stun:stun.ronde.vu:3478"]
+      urls: ["stun:57.129.61.67:3478"]
     },
     {
       urls: [
-        "turn:turn.ronde.vu:3478?transport=udp",
-        "turn:turn.ronde.vu:3478?transport=tcp"
+        "turn:57.129.61.67:3478?transport=udp",
+        "turn:57.129.61.67:3478?transport=tcp"
       ],
       username: "webrtcuser",
       credential: "supersecretpassword"
