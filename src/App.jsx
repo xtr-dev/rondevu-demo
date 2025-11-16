@@ -33,8 +33,11 @@ export default function App() {
   const [myConnections, setMyConnections] = useState([]);
 
   // Discovery state
-  const [searchTopic, setSearchTopic] = useState('demo-chat');
+  const [selectedTopic, setSelectedTopic] = useState(null);
   const [discoveredOffers, setDiscoveredOffers] = useState([]);
+  const [topics, setTopics] = useState([]);
+  const [topicsLoading, setTopicsLoading] = useState(false);
+  const [topicsError, setTopicsError] = useState(null);
 
   // Messages
   const [messages, setMessages] = useState([]);
@@ -192,8 +195,32 @@ export default function App() {
     }
   };
 
-  // Discover peers
-  const handleDiscoverPeers = async () => {
+  // Fetch available topics from server
+  const fetchTopics = async () => {
+    if (!client) return;
+
+    try {
+      setTopicsLoading(true);
+      setTopicsError(null);
+      const result = await client.offers.getTopics({ limit: 100 });
+      setTopics(result.topics);
+    } catch (err) {
+      console.error('Error fetching topics:', err);
+      setTopicsError(err.message);
+    } finally {
+      setTopicsLoading(false);
+    }
+  };
+
+  // Fetch topics when discover tab is opened
+  useEffect(() => {
+    if (activeTab === 'discover' && topics.length === 0 && !topicsLoading && client) {
+      fetchTopics();
+    }
+  }, [activeTab, client]);
+
+  // Discover peers by topic
+  const handleDiscoverPeers = async (topicName) => {
     if (!client) return;
 
     if (!client.isAuthenticated()) {
@@ -202,13 +229,14 @@ export default function App() {
     }
 
     try {
-      const offers = await client.offers.findByTopic(searchTopic.trim(), {limit: 50});
+      setSelectedTopic(topicName);
+      const offers = await client.offers.findByTopic(topicName, {limit: 50});
       setDiscoveredOffers(offers);
 
       if (offers.length === 0) {
-        toast.error('No peers found!');
+        toast(`No peers found for "${topicName}"`);
       } else {
-        toast.success(`Found ${offers.length} peer(s)`);
+        toast.success(`Found ${offers.length} peer(s) for "${topicName}"`);
       }
     } catch (err) {
       toast.error(`Error: ${err.message}`);
@@ -600,52 +628,122 @@ export default function App() {
           {activeTab === 'discover' && (
             <div>
               <h2>Discover Peers</h2>
-              <p style={styles.desc}>Search for peers by topic</p>
+              <p style={styles.desc}>Browse topics to find peers</p>
 
-              <div style={{marginBottom: '20px'}}>
-                <label style={styles.label}>Topic:</label>
-                <div style={{display: 'flex', gap: '10px'}}>
-                  <input
-                    type="text"
-                    value={searchTopic}
-                    onChange={(e) => setSearchTopic(e.target.value)}
-                    onKeyPress={(e) => e.key === 'Enter' && handleDiscoverPeers()}
-                    style={{...styles.input, flex: 1}}
-                  />
-                  <button onClick={handleDiscoverPeers} style={styles.btnPrimary}>
-                    🔍 Search
-                  </button>
-                </div>
-              </div>
-
-              {discoveredOffers.length > 0 && (
+              {!selectedTopic ? (
                 <div>
-                  <h3>Found {discoveredOffers.length} Peer(s)</h3>
-                  {discoveredOffers.map(offer => {
-                    const isConnected = myConnections.some(c => c.id === offer.id);
-                    const isMine = credentials && offer.peerId === credentials.peerId;
+                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
+                    <h3>Active Topics ({topics.length})</h3>
+                    <button onClick={fetchTopics} style={styles.btnSecondary} disabled={topicsLoading}>
+                      {topicsLoading ? '⟳ Loading...' : '🔄 Refresh'}
+                    </button>
+                  </div>
 
-                    return (
-                      <div key={offer.id} style={styles.card}>
-                        <div style={{marginBottom: '10px'}}>
-                          <div style={{fontWeight: '600'}}>{offer.topics.join(', ')}</div>
-                          <div style={{fontSize: '0.85em', color: '#666'}}>
-                            Peer: {offer.peerId.substring(0, 16)}...
+                  {topicsLoading ? (
+                    <div style={{textAlign: 'center', padding: '60px', color: '#999'}}>
+                      <div style={{fontSize: '3em', marginBottom: '10px'}}>⟳</div>
+                      <div>Loading topics...</div>
+                    </div>
+                  ) : topicsError ? (
+                    <div style={{textAlign: 'center', padding: '40px'}}>
+                      <div style={{...styles.card, background: '#ffebee', color: '#c62828', border: '2px solid #ef9a9a'}}>
+                        <div style={{fontSize: '2em', marginBottom: '10px'}}>⚠️</div>
+                        <div style={{fontWeight: '600', marginBottom: '5px'}}>Failed to load topics</div>
+                        <div style={{fontSize: '0.9em'}}>{topicsError}</div>
+                        <button onClick={fetchTopics} style={{...styles.btnPrimary, marginTop: '15px'}}>
+                          Try Again
+                        </button>
+                      </div>
+                    </div>
+                  ) : topics.length === 0 ? (
+                    <div style={{textAlign: 'center', padding: '60px', color: '#999'}}>
+                      <div style={{fontSize: '3em', marginBottom: '10px'}}>📭</div>
+                      <div style={{fontWeight: '600', marginBottom: '5px'}}>No active topics</div>
+                      <div style={{fontSize: '0.9em'}}>Create an offer to start a new topic</div>
+                    </div>
+                  ) : (
+                    <div style={styles.topicsGrid}>
+                      {topics.map(topic => (
+                        <div
+                          key={topic.topic}
+                          className="topic-card-hover"
+                          onClick={() => handleDiscoverPeers(topic.topic)}
+                        >
+                          <div style={{fontSize: '2.5em', marginBottom: '10px'}}>💬</div>
+                          <div style={{fontWeight: '600', marginBottom: '5px', wordBreak: 'break-word'}}>{topic.topic}</div>
+                          <div style={{
+                            fontSize: '0.85em',
+                            color: '#667eea',
+                            fontWeight: '600',
+                            background: '#f0f2ff',
+                            padding: '4px 12px',
+                            borderRadius: '12px',
+                            display: 'inline-block',
+                            marginTop: '5px'
+                          }}>
+                            {topic.activePeers} {topic.activePeers === 1 ? 'peer' : 'peers'}
                           </div>
                         </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  <div style={{marginBottom: '20px'}}>
+                    <button
+                      onClick={() => {
+                        setSelectedTopic(null);
+                        setDiscoveredOffers([]);
+                        fetchTopics(); // Refresh topics when going back
+                      }}
+                      style={{...styles.btnSecondary, marginBottom: '10px'}}
+                    >
+                      ← Back to Topics
+                    </button>
+                    <h3>Topic: {selectedTopic}</h3>
+                  </div>
 
-                        {isMine ? (
-                          <div style={{...styles.badge, background: '#2196f3'}}>Your offer</div>
-                        ) : isConnected ? (
-                          <div style={{...styles.badge, background: '#4caf50'}}>✓ Connected</div>
-                        ) : (
-                          <button onClick={() => handleAnswerOffer(offer)} style={styles.btnSuccess}>
-                            🤝 Connect
-                          </button>
-                        )}
+                  {discoveredOffers.length > 0 ? (
+                    <div>
+                      <p style={{marginBottom: '15px', color: '#666'}}>
+                        Found {discoveredOffers.length} peer(s)
+                      </p>
+                      {discoveredOffers.map(offer => {
+                        const isConnected = myConnections.some(c => c.id === offer.id);
+                        const isMine = credentials && offer.peerId === credentials.peerId;
+
+                        return (
+                          <div key={offer.id} style={styles.card}>
+                            <div style={{marginBottom: '10px'}}>
+                              <div style={{fontWeight: '600'}}>{offer.topics.join(', ')}</div>
+                              <div style={{fontSize: '0.85em', color: '#666'}}>
+                                Peer: {offer.peerId.substring(0, 16)}...
+                              </div>
+                            </div>
+
+                            {isMine ? (
+                              <div style={{...styles.badge, background: '#2196f3'}}>Your offer</div>
+                            ) : isConnected ? (
+                              <div style={{...styles.badge, background: '#4caf50'}}>✓ Connected</div>
+                            ) : (
+                              <button onClick={() => handleAnswerOffer(offer)} style={styles.btnSuccess}>
+                                🤝 Connect
+                              </button>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div style={{textAlign: 'center', padding: '40px', color: '#999'}}>
+                      <div style={{fontSize: '3em'}}>🔍</div>
+                      <div>No peers available for this topic</div>
+                      <div style={{fontSize: '0.9em', marginTop: '10px'}}>
+                        Try creating an offer or check back later
                       </div>
-                    );
-                  })}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -858,6 +956,16 @@ const styles = {
     fontWeight: '600',
     width: '100%'
   },
+  btnSecondary: {
+    padding: '10px 20px',
+    background: '#f5f5f5',
+    color: '#333',
+    border: '2px solid #e0e0e0',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '0.95em',
+    fontWeight: '600'
+  },
   btnDanger: {
     padding: '12px 24px',
     background: '#f44336',
@@ -895,5 +1003,11 @@ const styles = {
     color: 'white',
     opacity: 0.8,
     fontSize: '0.9em'
+  },
+  topicsGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
+    gap: '15px',
+    marginTop: '20px'
   }
 };

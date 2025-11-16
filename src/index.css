@@ -997,3 +997,22 @@ input[type="text"]:disabled {
   transform: translateY(-2px);
   box-shadow: 0 6px 16px rgba(85, 104, 211, 0.4);
 }
+
+/* Topic cards grid for discovery */
+.topic-card-hover {
+  padding: 25px;
+  background: white;
+  border-radius: 12px;
+  border: 2px solid #e0e0e0;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.topic-card-hover:hover {
+  border-color: #667eea;
+  background: #fafbfc;
+  transform: translateY(-3px);
+  box-shadow: 0 6px 16px rgba(102, 126, 234, 0.2);
+}
