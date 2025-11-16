@@ -115,10 +115,10 @@ The easiest way to test:
 This demo uses the `RondevuPeer` class which implements a clean state-based connection lifecycle:
 
 ```javascript
-import { RondevuPeer } from '@xtr-dev/rondevu-client';
+import { Rondevu } from '@xtr-dev/rondevu-client';
 
 // Create peer
-const peer = new RondevuPeer(client.offers);
+const peer = client.createPeer();
 
 // Set up event listeners
 peer.on('state', (state) => {
