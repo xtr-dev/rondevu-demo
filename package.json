@@ -10,7 +10,7 @@
     "deploy": "npm run build && npx wrangler pages deploy dist --project-name=rondevu-demo"
   },
   "dependencies": {
-    "@xtr-dev/rondevu-client": "^0.7.2",
+    "@xtr-dev/rondevu-client": "^0.7.3",
     "@zxing/library": "^0.21.3",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
