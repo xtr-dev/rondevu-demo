@@ -6,21 +6,20 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    // TCP transport to TURN server - VPN blocks UDP connections to TURN
     {
-      urls: "turn:standard.relay.metered.ca:80?transport=tcp",
-      username: "c53a9c971da5e6f3bc959d8d",
-      credential: "QaccPqtPPaxyokXp",
+      urls: ["stun:stun.ronde.vu:3478"]
     },
     {
-      urls: "turns:standard.relay.metered.ca:443?transport=tcp",
-      username: "c53a9c971da5e6f3bc959d8d",
-      credential: "QaccPqtPPaxyokXp",
-    },
+      urls: [
+        "turn:turn.ronde.vu:3478?transport=tcp",
+        "turn:turn.ronde.vu:3478?transport=udp",
+      ],
+      username: "webrtcuser",
+      credential: "supersecretpassword"
+    }
   ],
-  // Force relay to avoid direct connection attempts through VPN
-  iceTransportPolicy: 'relay',
-  iceCandidatePoolSize: 10
+  // Force relay to test TURN server (comment out for normal operation)
+  // iceTransportPolicy: 'relay'
 };
 
 export default function App() {
@@ -70,13 +69,14 @@ export default function App() {
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount only (empty dependency array)
   useEffect(() => {
     return () => {
-      // Close all connections when component unmounts
-      myConnections.forEach(c => c.conn?.close());
+      // Close all peer connections when component unmounts
+      myConnections.forEach(c => c.peer?.close());
     };
-  }, [myConnections]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Empty deps = only run on mount/unmount
 
   // Register
   const handleRegister = async () => {
@@ -94,7 +94,7 @@ export default function App() {
     }
   };
 
-  // Create offer with connection manager
+  // Create offer with peer connection manager
   const handleCreateOffer = async () => {
     if (!client || !credentials) {
       toast.error('Please register first!');
@@ -104,59 +104,72 @@ export default function App() {
     try {
       const topics = offerTopics.split(',').map(t => t.trim()).filter(Boolean);
 
-      // Create connection using the manager
-      const conn = client.createConnection(RTC_CONFIG);
+      // Create peer connection using the manager
+      const peer = client.createPeer(RTC_CONFIG);
 
       // Add debugging
       addApiLogging(client);
-      addIceLogging(conn);
+      addIceLogging(peer);
 
       // Setup event listeners
-      conn.on('connecting', () => {
-        updateConnectionStatus(conn.id, 'connecting');
+      peer.on('state', (state) => {
+        console.log(`🔄 Peer state: ${state}`);
+        updateConnectionStatus(peer.offerId, state);
       });
 
-      conn.on('connected', () => {
-        updateConnectionStatus(conn.id, 'connected');
+      peer.on('connected', () => {
+        updateConnectionStatus(peer.offerId, 'connected');
       });
 
-      conn.on('disconnected', () => {
-        updateConnectionStatus(conn.id, 'disconnected');
+      peer.on('disconnected', () => {
+        updateConnectionStatus(peer.offerId, 'disconnected');
       });
 
-      conn.on('datachannel', (channel) => {
+      peer.on('failed', (error) => {
+        console.error('❌ Peer connection failed:', error);
+        toast.error(`Connection failed: ${error.message}`);
+        updateConnectionStatus(peer.offerId, 'failed');
+      });
+
+      peer.on('datachannel', (channel) => {
         // Handle data channel
         channel.onmessage = (event) => {
           setMessages(prev => [...prev, {
             from: 'peer',
             text: event.data,
             timestamp: Date.now(),
-            connId: conn.id
+            connId: peer.offerId
           }]);
         };
 
-        updateConnectionChannel(conn.id, channel);
+        updateConnectionChannel(peer.offerId, channel);
       });
 
       // Create offer
-      const offerId = await conn.createOffer({
+      const offerId = await peer.createOffer({
         topics,
-        ttl: 300000
+        ttl: 300000,
+        timeouts: {
+          iceGathering: 15000,
+          waitingForAnswer: 60000,
+          iceConnection: 45000
+        }
       });
 
       // Add to connections list
       setMyConnections(prev => [...prev, {
         id: offerId,
         topics,
-        status: 'waiting',
+        status: 'waiting-for-answer',
         role: 'offerer',
-        conn,
-        channel: conn.channel
+        peer,
+        channel: null
       }]);
 
       setOfferTopics('');
       toast.success(`Created offer! Share topic "${topics[0]}" with peers.`);
     } catch (err) {
+      console.error('Error creating offer:', err);
       toast.error(`Error: ${err.message}`);
     }
   };
@@ -192,56 +205,71 @@ export default function App() {
     }
 
     try {
-      // Create connection using the manager
-      const conn = client.createConnection(RTC_CONFIG);
+      // Create peer connection using the manager
+      const peer = client.createPeer(RTC_CONFIG);
 
       // Add debugging
       addApiLogging(client);
-      addIceLogging(conn);
+      addIceLogging(peer);
 
       // Setup event listeners
-      conn.on('connecting', () => {
-        updateConnectionStatus(conn.id, 'connecting');
+      peer.on('state', (state) => {
+        console.log(`🔄 Peer state: ${state}`);
+        updateConnectionStatus(offer.id, state);
       });
 
-      conn.on('connected', () => {
-        updateConnectionStatus(conn.id, 'connected');
+      peer.on('connected', () => {
+        updateConnectionStatus(offer.id, 'connected');
       });
 
-      conn.on('disconnected', () => {
-        updateConnectionStatus(conn.id, 'disconnected');
+      peer.on('disconnected', () => {
+        updateConnectionStatus(offer.id, 'disconnected');
       });
 
-      conn.on('datachannel', (channel) => {
+      peer.on('failed', (error) => {
+        console.error('❌ Peer connection failed:', error);
+        toast.error(`Connection failed: ${error.message}`);
+        updateConnectionStatus(offer.id, 'failed');
+      });
+
+      peer.on('datachannel', (channel) => {
         // Handle data channel
         channel.onmessage = (event) => {
           setMessages(prev => [...prev, {
             from: 'peer',
             text: event.data,
             timestamp: Date.now(),
-            connId: conn.id
+            connId: offer.id
           }]);
         };
 
-        updateConnectionChannel(conn.id, channel);
+        updateConnectionChannel(offer.id, channel);
       });
 
       // Answer the offer
-      await conn.answer(offer.id, offer.sdp);
+      await peer.answer(offer.id, offer.sdp, {
+        topics: offer.topics,
+        timeouts: {
+          iceGathering: 15000,
+          creatingAnswer: 15000,
+          iceConnection: 45000
+        }
+      });
 
       // Add to connections list
       setMyConnections(prev => [...prev, {
         id: offer.id,
         topics: offer.topics,
-        status: 'connecting',
+        status: 'answering',
         role: 'answerer',
-        conn,
+        peer,
         channel: null
       }]);
 
       setActiveTab('connections');
-      toast.success('Connecting...');
+      toast.success('Answering offer...');
     } catch (err) {
+      console.error('Error answering offer:', err);
       toast.error(`Error: ${err.message}`);
     }
   };
@@ -266,26 +294,43 @@ export default function App() {
 
     client.offers.addIceCandidates = async (offerId, candidates) => {
       console.log(`📤 Sending ${candidates.length} ICE candidate(s) to server for offer ${offerId}`);
-      return originalAddIceCandidates(offerId, candidates);
+      console.log(`📤 Candidates:`, candidates);
+      const result = await originalAddIceCandidates(offerId, candidates);
+      console.log(`📤 Send result:`, result);
+      return result;
     };
 
     client.offers.getIceCandidates = async (offerId, since) => {
       const result = await originalGetIceCandidates(offerId, since);
       console.log(`📥 Received ${result.length} ICE candidate(s) from server for offer ${offerId}, since=${since}`);
       if (result.length > 0) {
-        console.log(`📥 First candidate:`, result[0]);
+        console.log(`📥 All candidates:`, result);
+        result.forEach((cand, i) => {
+          console.log(`📥 Candidate ${i}:`, {
+            role: cand.role,
+            peerId: cand.peerId,
+            candidate: cand.candidate,
+            createdAt: cand.createdAt
+          });
+        });
       }
       return result;
     };
   };
 
-  // Add ICE debugging to a connection
-  const addIceLogging = (conn) => {
-    const pc = conn['pc']; // Access underlying peer connection for debugging
+  // Add ICE debugging to a peer connection
+  const addIceLogging = (peer) => {
+    const pc = peer.pc; // Access underlying peer connection for debugging
     if (pc) {
       // Add new handlers that don't override existing ones
       pc.addEventListener('icecandidate', (event) => {
         if (event.candidate) {
+          // Skip empty/end-of-candidates markers in logs
+          if (!event.candidate.candidate || event.candidate.candidate === '') {
+            console.log('🧊 ICE gathering complete (end-of-candidates marker)');
+            return;
+          }
+
           console.log('🧊 ICE candidate gathered:', {
             type: event.candidate.type,
             protocol: event.candidate.protocol,
@@ -304,10 +349,67 @@ export default function App() {
 
       pc.addEventListener('iceconnectionstatechange', () => {
         console.log('🧊 ICE connection state:', pc.iceConnectionState);
+        if (pc.iceConnectionState === 'failed') {
+          console.error('❌ ICE connection failed! Check firewall/NAT/TURN server.');
+          // Log stats when failed
+          pc.getStats().then(stats => {
+            console.log('📊 Connection stats at failure:', stats);
+          });
+        } else if (pc.iceConnectionState === 'checking') {
+          console.log('⏳ ICE checking candidates...');
+          // Set a timeout to detect if we're stuck
+          setTimeout(() => {
+            if (pc.iceConnectionState === 'checking') {
+              console.warn('⚠️ Still in checking state after 30s - connection may be stuck');
+              pc.getStats().then(stats => {
+                stats.forEach(report => {
+                  if (report.type === 'candidate-pair') {
+                    console.log('Candidate pair:', report);
+                  }
+                });
+              });
+            }
+          }, 30000);
+        }
       });
 
       pc.addEventListener('connectionstatechange', () => {
         console.log('🔌 Connection state:', pc.connectionState);
+        if (pc.connectionState === 'failed') {
+          console.error('❌ Connection failed!');
+          // Log the selected candidate pair to see what was attempted
+          pc.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'candidate-pair' && report.selected) {
+                console.log('Selected candidate pair:', report);
+              }
+            });
+          });
+        }
+      });
+
+      // Log ICE candidate pair changes
+      pc.addEventListener('icecandidate', () => {
+        setTimeout(() => {
+          pc.getStats().then(stats => {
+            stats.forEach(report => {
+              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
+                console.log('✅ ICE candidate pair succeeded:', {
+                  local: report.localCandidateId,
+                  remote: report.remoteCandidateId,
+                  nominated: report.nominated,
+                  state: report.state
+                });
+              } else if (report.type === 'candidate-pair' && report.state === 'failed') {
+                console.log('❌ ICE candidate pair failed:', {
+                  local: report.localCandidateId,
+                  remote: report.remoteCandidateId,
+                  state: report.state
+                });
+              }
+            });
+          });
+        }, 1000);
       });
     }
   };
@@ -336,7 +438,7 @@ export default function App() {
     localStorage.removeItem('rondevu-credentials');
     setCredentials(null);
     setStatus('Not registered');
-    myConnections.forEach(c => c.conn?.close());
+    myConnections.forEach(c => c.peer?.close());
     setMyConnections([]);
     setMessages([]);
     setClient(new Rondevu({baseUrl: API_URL}));
@@ -350,7 +452,7 @@ export default function App() {
         <div style={styles.header}>
           <h1 style={styles.title}>🌐 Rondevu</h1>
           <p style={styles.subtitle}>Topic-Based Peer Discovery & WebRTC</p>
-          <p style={styles.version}>v0.4.0 - With Connection Manager</p>
+          <p style={styles.version}>v0.5.0 - State-Based Peer Manager</p>
         </div>
 
         {/* Tabs */}
