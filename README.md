@@ -5,7 +5,7 @@
 Experience topic-based peer discovery and WebRTC connections using the Rondevu signaling platform.
 
 **Related repositories:**
-- [rondevu-server](https://github.com/xtr-dev/rondevu) - HTTP signaling server
+- [rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server
 - [rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library
 
 ---
@@ -17,14 +17,15 @@ This demo showcases the complete Rondevu workflow:
 1. **Register** - Get peer credentials (automatically saved)
 2. **Create Offers** - Advertise your WebRTC connection on topics
 3. **Discover Peers** - Find other peers by topic
-4. **Connect** - Establish direct P2P WebRTC connections
+4. **Connect** - Establish direct P2P WebRTC connections via `RondevuPeer`
 5. **Chat** - Send messages over WebRTC data channels
 
 ### Key Features
 
 - **Topic-Based Discovery** - Find peers by shared topics (like torrent infohashes)
 - **Real P2P Connections** - Actual WebRTC data channels (not simulated)
-- **Connection Manager** - Uses high-level `RondevuConnection` API (no manual WebRTC plumbing)
+- **State-Based Peer Management** - Uses `RondevuPeer` with clean state machine (idle → creating-offer → waiting-for-answer → exchanging-ice → connected)
+- **Trickle ICE** - Fast connection establishment by sending ICE candidates as they're discovered
 - **Persistent Credentials** - Saves authentication to localStorage
 - **Topics Browser** - Browse all active topics and peer counts
 - **Multiple Connections** - Support multiple simultaneous peer connections
@@ -109,76 +110,121 @@ The easiest way to test:
 
 ## Technical Implementation
 
-### Connection Manager
+### RondevuPeer State Machine
 
-This demo uses the high-level `RondevuConnection` class which abstracts all WebRTC complexity:
+This demo uses the `RondevuPeer` class which implements a clean state-based connection lifecycle:
 
 ```javascript
-// Create connection
-const conn = client.createConnection();
+import { RondevuPeer } from '@xtr-dev/rondevu-client';
+
+// Create peer
+const peer = new RondevuPeer(client.offers);
 
 // Set up event listeners
-conn.on('connected', () => {
-  console.log('P2P connection established!');
+peer.on('state', (state) => {
+  console.log('Peer state:', state);
+  // Offerer: idle → creating-offer → waiting-for-answer → exchanging-ice → connected
+  // Answerer: idle → answering → exchanging-ice → connected
 });
 
-conn.on('datachannel', (channel) => {
-  channel.onmessage = (event) => {
-    console.log('Message:', event.data);
-  };
+peer.on('connected', () => {
+  console.log('✅ P2P connection established!');
 });
 
-// Create offer
-await conn.createOffer({
+peer.on('datachannel', (channel) => {
+  channel.addEventListener('message', (event) => {
+    console.log('📥 Message:', event.data);
+  });
+
+  channel.addEventListener('open', () => {
+    // Channel is ready, can send messages
+    channel.send('Hello!');
+  });
+});
+
+peer.on('failed', (error) => {
+  console.error('❌ Connection failed:', error);
+});
+
+// Create offer (offerer)
+await peer.createOffer({
   topics: ['demo-room'],
   ttl: 300000
 });
 
-// Or answer an offer
-await conn.answer(offerId, offerSdp);
+// Or answer an offer (answerer)
+await peer.answer(offerId, offerSdp, {
+  topics: ['demo-room']
+});
 ```
 
-The connection manager handles:
-- Offer/answer SDP generation
-- ICE candidate gathering and exchange
-- Automatic polling for answers and candidates
-- Data channel lifecycle
-- Connection state management
-- Event-driven API
+### Connection States
+
+**Offerer Flow:**
+1. **idle** - Initial state
+2. **creating-offer** - Creating WebRTC offer and sending to server
+3. **waiting-for-answer** - Polling for answer from peer (every 2 seconds)
+4. **exchanging-ice** - Exchanging ICE candidates (polling every 1 second)
+5. **connected** - Successfully connected!
+6. **failed/closed** - Connection failed or was closed
+
+**Answerer Flow:**
+1. **idle** - Initial state
+2. **answering** - Creating WebRTC answer and sending to server
+3. **exchanging-ice** - Exchanging ICE candidates (polling every 1 second)
+4. **connected** - Successfully connected!
+5. **failed/closed** - Connection failed or was closed
 
 ### What Happens Under the Hood
 
-1. **Offerer** calls `conn.createOffer()`:
-   - Creates RTCPeerConnection
+1. **Offerer** calls `peer.createOffer()`:
+   - State → `creating-offer`
+   - Creates RTCPeerConnection and data channel
    - Generates SDP offer
-   - Creates data channel
+   - Sets up ICE candidate handler (before gathering starts)
+   - Sets local description → ICE gathering begins
    - Posts offer to Rondevu server
+   - State → `waiting-for-answer`
    - Polls for answers every 2 seconds
+   - When answer received → State → `exchanging-ice`
 
-2. **Answerer** calls `conn.answer()`:
+2. **Answerer** calls `peer.answer()`:
+   - State → `answering`
    - Creates RTCPeerConnection
    - Sets remote description (offer SDP)
    - Generates SDP answer
-   - Posts answer to server
-   - Polls for ICE candidates every 1 second
+   - Sends answer to server (registers as answerer)
+   - Sets up ICE candidate handler (before gathering starts)
+   - Sets local description → ICE gathering begins
+   - State → `exchanging-ice`
 
-3. **ICE Exchange**:
-   - Both peers generate ICE candidates
-   - Candidates are automatically sent to server
-   - Peers poll and receive remote candidates
+3. **ICE Exchange** (Trickle ICE):
+   - Both peers generate ICE candidates as they're discovered
+   - Candidates are automatically sent to server immediately
+   - Peers poll and receive remote candidates (every 1 second)
    - ICE establishes the direct P2P path
+   - State → `connected`
 
 4. **Connection Established**:
    - Data channel opens
    - Chat messages flow directly between peers
    - No server relay (true P2P!)
 
+### Key Features of Implementation
+
+- **Trickle ICE**: Candidates sent immediately as discovered (no waiting)
+- **Proper Authorization**: Answer sent to server before ICE gathering to authorize candidate posting
+- **Event Cleanup**: All event listeners properly removed with `removeEventListener`
+- **State Management**: Clean state machine with well-defined transitions
+- **Error Handling**: Graceful failure states with error events
+
 ### Architecture
 
 - **Frontend**: React + Vite
 - **Signaling**: Rondevu server (Cloudflare Workers + D1)
 - **Client**: @xtr-dev/rondevu-client (TypeScript library)
-- **WebRTC**: RTCPeerConnection with Google STUN servers
+- **WebRTC**: RTCPeerConnection with STUN/TURN servers
+- **Connection Management**: RondevuPeer class with state machine
 
 ## Server Configuration
 
@@ -213,18 +259,41 @@ npx wrangler pages deploy dist --project-name=rondevu-demo
 
 - Credentials are stored in localStorage and persist across sessions
 - Offers expire after 5 minutes by default
-- The connection manager polls automatically (no manual polling needed)
+- The peer automatically polls for answers and ICE candidates
 - Multiple simultaneous connections are supported
-- WebRTC uses Google's public STUN servers for NAT traversal
+- WebRTC uses Google's public STUN servers + custom TURN server for NAT traversal
 - Data channel messages are unreliable but fast (perfect for chat)
+- Connection cleanup is automatic when peers disconnect
+
+## Connection Timeouts
+
+The demo uses these default timeouts:
+
+- **ICE Gathering**: 10 seconds (not used with trickle ICE)
+- **Waiting for Answer**: 30 seconds
+- **Creating Answer**: 10 seconds
+- **ICE Connection**: 30 seconds
+
+These can be customized in the `PeerOptions`:
+
+```javascript
+await peer.createOffer({
+  topics: ['my-topic'],
+  timeouts: {
+    waitingForAnswer: 60000,  // 1 minute
+    iceConnection: 45000      // 45 seconds
+  }
+});
+```
 
 ## Technologies
 
 - **React** - UI framework
 - **Vite** - Build tool and dev server
-- **@xtr-dev/rondevu-client** - Rondevu client library
+- **@xtr-dev/rondevu-client** - Rondevu client library with `RondevuPeer`
 - **RTCPeerConnection** - WebRTC connections
 - **RTCDataChannel** - P2P messaging
+- **QRCode** - QR code generation for easy topic sharing
 
 ## License
 
