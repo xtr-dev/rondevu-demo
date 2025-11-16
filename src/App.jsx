@@ -132,6 +132,8 @@ export default function App() {
       });
 
       peer.on('datachannel', (channel) => {
+        console.log(`📡 Data channel received, state: ${channel.readyState}`);
+
         // Handle data channel
         channel.onmessage = (event) => {
           setMessages(prev => [...prev, {
@@ -142,7 +144,23 @@ export default function App() {
           }]);
         };
 
-        updateConnectionChannel(peer.offerId, channel);
+        channel.onopen = () => {
+          console.log(`✅ Data channel opened for offer ${peer.offerId}`);
+          updateConnectionChannel(peer.offerId, channel);
+        };
+
+        channel.onerror = (error) => {
+          console.error('❌ Data channel error:', error);
+        };
+
+        channel.onclose = () => {
+          console.log('🔒 Data channel closed');
+        };
+
+        // If already open, update immediately
+        if (channel.readyState === 'open') {
+          updateConnectionChannel(peer.offerId, channel);
+        }
       });
 
       // Create offer
@@ -233,6 +251,8 @@ export default function App() {
       });
 
       peer.on('datachannel', (channel) => {
+        console.log(`📡 Data channel received, state: ${channel.readyState}`);
+
         // Handle data channel
         channel.onmessage = (event) => {
           setMessages(prev => [...prev, {
@@ -243,7 +263,23 @@ export default function App() {
           }]);
         };
 
-        updateConnectionChannel(offer.id, channel);
+        channel.onopen = () => {
+          console.log(`✅ Data channel opened for offer ${offer.id}`);
+          updateConnectionChannel(offer.id, channel);
+        };
+
+        channel.onerror = (error) => {
+          console.error('❌ Data channel error:', error);
+        };
+
+        channel.onclose = () => {
+          console.log('🔒 Data channel closed');
+        };
+
+        // If already open, update immediately
+        if (channel.readyState === 'open') {
+          updateConnectionChannel(offer.id, channel);
+        }
       });
 
       // Answer the offer
