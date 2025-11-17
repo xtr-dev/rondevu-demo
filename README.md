@@ -5,8 +5,9 @@
 Experience topic-based peer discovery and WebRTC connections using the Rondevu signaling platform.
 
 **Related repositories:**
-- [rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server
-- [rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library
+- [@xtr-dev/rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library ([npm](https://www.npmjs.com/package/@xtr-dev/rondevu-client))
+- [@xtr-dev/rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server ([npm](https://www.npmjs.com/package/@xtr-dev/rondevu-server))
+- [@xtr-dev/rondevu-demo](https://github.com/xtr-dev/rondevu-demo) - Interactive demo ([live](https://rondevu-demo.pages.dev))
 
 ---
 
