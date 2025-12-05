@@ -1,14 +1,12 @@
-import React, {useState, useEffect} from 'react';
-import {Rondevu} from '@xtr-dev/rondevu-client';
-import toast, {Toaster} from 'react-hot-toast';
+import React, { useState, useEffect, useRef } from 'react';
+import { Rondevu } from '@xtr-dev/rondevu-client';
+import toast, { Toaster } from 'react-hot-toast';
 
 const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    {
-      urls: ["stun:stun.ronde.vu:3478"]
-    },
+    { urls: ["stun:stun.ronde.vu:3478"] },
     {
       urls: [
         "turn:turn.ronde.vu:3478?transport=tcp",
@@ -17,997 +15,1004 @@ const RTC_CONFIG = {
       username: "webrtcuser",
       credential: "supersecretpassword"
     }
-  ],
-  // Force relay to test TURN server (comment out for normal operation)
-  // iceTransportPolicy: 'relay'
+  ]
 };
 
 export default function App() {
   const [client, setClient] = useState(null);
   const [credentials, setCredentials] = useState(null);
-  const [activeTab, setActiveTab] = useState('setup');
-  const [status, setStatus] = useState('Not registered');
+  const [myUsername, setMyUsername] = useState(null);
 
-  // Offer state
-  const [offerTopics, setOfferTopics] = useState('demo-chat');
-  const [myConnections, setMyConnections] = useState([]);
+  // Setup
+  const [setupStep, setSetupStep] = useState('register'); // register, claim, ready
+  const [usernameInput, setUsernameInput] = useState('');
 
-  // Discovery state
-  const [selectedTopic, setSelectedTopic] = useState(null);
-  const [discoveredOffers, setDiscoveredOffers] = useState([]);
-  const [topics, setTopics] = useState([]);
-  const [topicsLoading, setTopicsLoading] = useState(false);
-  const [topicsError, setTopicsError] = useState(null);
+  // Contacts
+  const [contacts, setContacts] = useState([]);
+  const [contactInput, setContactInput] = useState('');
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
 
-  // Messages
-  const [messages, setMessages] = useState([]);
-  const [messageInput, setMessageInput] = useState('');
+  // Chat
+  const [activeChats, setActiveChats] = useState({});
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [messageInputs, setMessageInputs] = useState({});
 
-  // Load credentials
+  // Service
+  const [serviceHandle, setServiceHandle] = useState(null);
+  const chatEndRef = useRef(null);
+
+  // Load saved data
   useEffect(() => {
-    const saved = localStorage.getItem('rondevu-credentials');
-    if (saved) {
+    const savedCreds = localStorage.getItem('rondevu-chat-credentials');
+    const savedUsername = localStorage.getItem('rondevu-chat-username');
+    const savedContacts = localStorage.getItem('rondevu-chat-contacts');
+
+    if (savedCreds) {
       try {
-        const creds = JSON.parse(saved);
-        // Validate credentials have required fields
-        if (creds && creds.peerId && creds.secret) {
-          setCredentials(creds);
-          setClient(new Rondevu({baseUrl: API_URL, credentials: creds}));
-          setStatus('Registered (from storage)');
-        } else {
-          // Invalid credentials, remove them
-          localStorage.removeItem('rondevu-credentials');
-          setClient(new Rondevu({baseUrl: API_URL}));
-          setStatus('Not registered');
-        }
+        const creds = JSON.parse(savedCreds);
+        setCredentials(creds);
+        setClient(new Rondevu({ baseUrl: API_URL, credentials: creds }));
       } catch (err) {
-        // Corrupted credentials, remove them
         console.error('Failed to load credentials:', err);
-        localStorage.removeItem('rondevu-credentials');
-        setClient(new Rondevu({baseUrl: API_URL}));
-        setStatus('Not registered');
+        setClient(new Rondevu({ baseUrl: API_URL }));
       }
     } else {
-      setClient(new Rondevu({baseUrl: API_URL}));
+      setClient(new Rondevu({ baseUrl: API_URL }));
+    }
+
+    if (savedUsername) {
+      setMyUsername(savedUsername);
+      setSetupStep('ready');
+    }
+
+    if (savedContacts) {
+      try {
+        setContacts(JSON.parse(savedContacts));
+      } catch (err) {
+        console.error('Failed to load contacts:', err);
+      }
     }
   }, []);
 
-  // Cleanup on unmount only (empty dependency array)
+  // Auto-scroll chat
   useEffect(() => {
-    return () => {
-      // Close all peer connections when component unmounts
-      myConnections.forEach(c => c.peer?.close());
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeChats, selectedChat]);
+
+  // Start chat service when ready
+  useEffect(() => {
+    if (setupStep === 'ready' && myUsername && client && !serviceHandle) {
+      startChatService();
+    }
+  }, [setupStep, myUsername, client]);
+
+  // Check online status periodically
+  useEffect(() => {
+    if (setupStep !== 'ready' || !client) return;
+
+    const checkOnlineStatus = async () => {
+      const online = new Set();
+      for (const contact of contacts) {
+        try {
+          const services = await client.discovery.listServices(contact);
+          if (services.services.some(s => s.serviceFqn === 'chat.rondevu@1.0.0')) {
+            online.add(contact);
+          }
+        } catch (err) {
+          // User offline or doesn't exist
+        }
+      }
+      setOnlineUsers(online);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // Empty deps = only run on mount/unmount
+
+    checkOnlineStatus();
+    const interval = setInterval(checkOnlineStatus, 10000); // Check every 10s
+
+    return () => clearInterval(interval);
+  }, [contacts, setupStep, client]);
 
   // Register
   const handleRegister = async () => {
     if (!client) return;
     try {
-      setStatus('Registering...');
       const creds = await client.register();
       setCredentials(creds);
-      localStorage.setItem('rondevu-credentials', JSON.stringify(creds));
-      setClient(new Rondevu({baseUrl: API_URL, credentials: creds}));
-      setStatus('Registered!');
-      setActiveTab('offer');
+      localStorage.setItem('rondevu-chat-credentials', JSON.stringify(creds));
+      setClient(new Rondevu({ baseUrl: API_URL, credentials: creds }));
+      setSetupStep('claim');
+      toast.success('Registered!');
     } catch (err) {
-      setStatus(`Error: ${err.message}`);
-    }
-  };
-
-  // Create offer with peer connection manager
-  const handleCreateOffer = async () => {
-    if (!client || !credentials) {
-      toast.error('Please register first!');
-      return;
-    }
-
-    try {
-      const topics = offerTopics.split(',').map(t => t.trim()).filter(Boolean);
-
-      // Create peer connection using the manager
-      const peer = client.createPeer(RTC_CONFIG);
-
-      // Add debugging
-      addApiLogging(client);
-      addIceLogging(peer);
-
-      // Setup event listeners
-      peer.on('state', (state) => {
-        console.log(`🔄 Peer state: ${state}`);
-        updateConnectionStatus(peer.offerId, state);
-      });
-
-      peer.on('connected', () => {
-        updateConnectionStatus(peer.offerId, 'connected');
-      });
-
-      peer.on('disconnected', () => {
-        updateConnectionStatus(peer.offerId, 'disconnected');
-      });
-
-      peer.on('failed', (error) => {
-        console.error('❌ Peer connection failed:', error);
-        toast.error(`Connection failed: ${error.message}`);
-        updateConnectionStatus(peer.offerId, 'failed');
-      });
-
-      peer.on('datachannel', (channel) => {
-        console.log(`📡 Data channel received, state: ${channel.readyState}`);
-
-        // Handle data channel
-        channel.onmessage = (event) => {
-          setMessages(prev => [...prev, {
-            from: 'peer',
-            text: event.data,
-            timestamp: Date.now(),
-            connId: peer.offerId
-          }]);
-        };
-
-        channel.onopen = () => {
-          console.log(`✅ Data channel opened for offer ${peer.offerId}`);
-          updateConnectionChannel(peer.offerId, channel);
-        };
-
-        channel.onerror = (error) => {
-          console.error('❌ Data channel error:', error);
-        };
-
-        channel.onclose = () => {
-          console.log('🔒 Data channel closed');
-        };
-
-        // If already open, update immediately
-        if (channel.readyState === 'open') {
-          updateConnectionChannel(peer.offerId, channel);
-        }
-      });
-
-      // Create offer
-      const offerId = await peer.createOffer({
-        topics,
-        ttl: 300000,
-        timeouts: {
-          iceGathering: 15000,
-          waitingForAnswer: 60000,
-          iceConnection: 45000
-        }
-      });
-
-      // Add to connections list
-      setMyConnections(prev => [...prev, {
-        id: offerId,
-        topics,
-        status: 'waiting-for-answer',
-        role: 'offerer',
-        peer,
-        channel: null
-      }]);
-
-      setOfferTopics('');
-      toast.success(`Created offer! Share topic "${topics[0]}" with peers.`);
-    } catch (err) {
-      console.error('Error creating offer:', err);
       toast.error(`Error: ${err.message}`);
     }
   };
 
-  // Fetch available topics from server
-  const fetchTopics = async () => {
-    if (!client) return;
-
+  // Claim username
+  const handleClaimUsername = async () => {
+    if (!client || !usernameInput) return;
     try {
-      setTopicsLoading(true);
-      setTopicsError(null);
-      const result = await client.offers.getTopics({ limit: 100 });
-      setTopics(result.topics);
+      const claim = await client.usernames.claimUsername(usernameInput);
+      client.usernames.saveKeypairToStorage(usernameInput, claim.publicKey, claim.privateKey);
+      setMyUsername(usernameInput);
+      localStorage.setItem('rondevu-chat-username', usernameInput);
+      setSetupStep('ready');
+      toast.success(`Welcome, ${usernameInput}!`);
     } catch (err) {
-      console.error('Error fetching topics:', err);
-      setTopicsError(err.message);
-    } finally {
-      setTopicsLoading(false);
+      toast.error(`Error: ${err.message}`);
     }
   };
 
-  // Fetch topics when discover tab is opened
-  useEffect(() => {
-    if (activeTab === 'discover' && topics.length === 0 && !topicsLoading && client) {
-      fetchTopics();
-    }
-  }, [activeTab, client]);
-
-  // Discover peers by topic
-  const handleDiscoverPeers = async (topicName) => {
-    if (!client) return;
-
-    if (!client.isAuthenticated()) {
-      toast.error('Please register first!');
-      return;
-    }
+  // Start pooled chat service
+  const startChatService = async () => {
+    if (!client || !myUsername || serviceHandle) return;
 
     try {
-      setSelectedTopic(topicName);
-      const offers = await client.offers.findByTopic(topicName, {limit: 50});
-      setDiscoveredOffers(offers);
-
-      if (offers.length === 0) {
-        toast(`No peers found for "${topicName}"`);
-      } else {
-        toast.success(`Found ${offers.length} peer(s) for "${topicName}"`);
+      const keypair = client.usernames.loadKeypairFromStorage(myUsername);
+      if (!keypair) {
+        toast.error('Username keypair not found');
+        return;
       }
-    } catch (err) {
-      toast.error(`Error: ${err.message}`);
-    }
-  };
 
-  // Answer an offer
-  const handleAnswerOffer = async (offer) => {
-    if (!client || !credentials) {
-      toast.error('Please register first!');
-      return;
-    }
+      const handle = await client.services.exposeService({
+        username: myUsername,
+        privateKey: keypair.privateKey,
+        serviceFqn: 'chat.rondevu@1.0.0',
+        isPublic: true,
+        poolSize: 10, // Support up to 10 simultaneous connections
+        rtcConfig: RTC_CONFIG,
+        handler: (channel, peer, connectionId) => {
+          console.log(`📡 New chat connection: ${connectionId}`);
 
-    try {
-      // Create peer connection using the manager
-      const peer = client.createPeer(RTC_CONFIG);
+          // Wait for peer to identify themselves
+          channel.onmessage = (event) => {
+            try {
+              const msg = JSON.parse(event.data);
 
-      // Add debugging
-      addApiLogging(client);
-      addIceLogging(peer);
-
-      // Setup event listeners
-      peer.on('state', (state) => {
-        console.log(`🔄 Peer state: ${state}`);
-        updateConnectionStatus(offer.id, state);
-      });
-
-      peer.on('connected', () => {
-        updateConnectionStatus(offer.id, 'connected');
-      });
-
-      peer.on('disconnected', () => {
-        updateConnectionStatus(offer.id, 'disconnected');
-      });
-
-      peer.on('failed', (error) => {
-        console.error('❌ Peer connection failed:', error);
-        toast.error(`Connection failed: ${error.message}`);
-        updateConnectionStatus(offer.id, 'failed');
-      });
-
-      peer.on('datachannel', (channel) => {
-        console.log(`📡 Data channel received, state: ${channel.readyState}`);
-
-        // Handle data channel
-        channel.onmessage = (event) => {
-          setMessages(prev => [...prev, {
-            from: 'peer',
-            text: event.data,
-            timestamp: Date.now(),
-            connId: offer.id
-          }]);
-        };
-
-        channel.onopen = () => {
-          console.log(`✅ Data channel opened for offer ${offer.id}`);
-          updateConnectionChannel(offer.id, channel);
-        };
-
-        channel.onerror = (error) => {
-          console.error('❌ Data channel error:', error);
-        };
-
-        channel.onclose = () => {
-          console.log('🔒 Data channel closed');
-        };
-
-        // If already open, update immediately
-        if (channel.readyState === 'open') {
-          updateConnectionChannel(offer.id, channel);
-        }
-      });
-
-      // Answer the offer
-      await peer.answer(offer.id, offer.sdp, {
-        topics: offer.topics,
-        timeouts: {
-          iceGathering: 15000,
-          creatingAnswer: 15000,
-          iceConnection: 45000
-        }
-      });
-
-      // Add to connections list
-      setMyConnections(prev => [...prev, {
-        id: offer.id,
-        topics: offer.topics,
-        status: 'answering',
-        role: 'answerer',
-        peer,
-        channel: null
-      }]);
-
-      setActiveTab('connections');
-      toast.success('Answering offer...');
-    } catch (err) {
-      console.error('Error answering offer:', err);
-      toast.error(`Error: ${err.message}`);
-    }
-  };
-
-  // Helper functions
-  const updateConnectionStatus = (connId, status) => {
-    setMyConnections(prev => prev.map(c =>
-      c.id === connId ? {...c, status} : c
-    ));
-  };
-
-  const updateConnectionChannel = (connId, channel) => {
-    setMyConnections(prev => prev.map(c =>
-      c.id === connId ? {...c, channel} : c
-    ));
-  };
-
-  // Add API-level ICE candidate logging
-  const addApiLogging = (client) => {
-    const originalAddIceCandidates = client.offers.addIceCandidates.bind(client.offers);
-    const originalGetIceCandidates = client.offers.getIceCandidates.bind(client.offers);
-
-    client.offers.addIceCandidates = async (offerId, candidates) => {
-      console.log(`📤 Sending ${candidates.length} ICE candidate(s) to server for offer ${offerId}`);
-      console.log(`📤 Candidates:`, candidates);
-      const result = await originalAddIceCandidates(offerId, candidates);
-      console.log(`📤 Send result:`, result);
-      return result;
-    };
-
-    client.offers.getIceCandidates = async (offerId, since) => {
-      const result = await originalGetIceCandidates(offerId, since);
-      console.log(`📥 Received ${result.length} ICE candidate(s) from server for offer ${offerId}, since=${since}`);
-      if (result.length > 0) {
-        console.log(`📥 All candidates:`, result);
-        result.forEach((cand, i) => {
-          console.log(`📥 Candidate ${i}:`, {
-            role: cand.role,
-            peerId: cand.peerId,
-            candidate: cand.candidate,
-            createdAt: cand.createdAt
-          });
-        });
-      }
-      return result;
-    };
-  };
-
-  // Add ICE debugging to a peer connection
-  const addIceLogging = (peer) => {
-    const pc = peer.pc; // Access underlying peer connection for debugging
-    if (pc) {
-      // Add new handlers that don't override existing ones
-      pc.addEventListener('icecandidate', (event) => {
-        if (event.candidate) {
-          // Skip empty/end-of-candidates markers in logs
-          if (!event.candidate.candidate || event.candidate.candidate === '') {
-            console.log('🧊 ICE gathering complete (end-of-candidates marker)');
-            return;
-          }
-
-          console.log('🧊 ICE candidate gathered:', {
-            type: event.candidate.type,
-            protocol: event.candidate.protocol,
-            address: event.candidate.address,
-            port: event.candidate.port,
-            candidate: event.candidate.candidate
-          });
-        } else {
-          console.log('🧊 ICE gathering complete');
-        }
-      });
-
-      pc.addEventListener('icegatheringstatechange', () => {
-        console.log('🧊 ICE gathering state:', pc.iceGatheringState);
-      });
-
-      pc.addEventListener('iceconnectionstatechange', () => {
-        console.log('🧊 ICE connection state:', pc.iceConnectionState);
-        if (pc.iceConnectionState === 'failed') {
-          console.error('❌ ICE connection failed! Check firewall/NAT/TURN server.');
-          // Log stats when failed
-          pc.getStats().then(stats => {
-            console.log('📊 Connection stats at failure:', stats);
-          });
-        } else if (pc.iceConnectionState === 'checking') {
-          console.log('⏳ ICE checking candidates...');
-          // Set a timeout to detect if we're stuck
-          setTimeout(() => {
-            if (pc.iceConnectionState === 'checking') {
-              console.warn('⚠️ Still in checking state after 30s - connection may be stuck');
-              pc.getStats().then(stats => {
-                stats.forEach(report => {
-                  if (report.type === 'candidate-pair') {
-                    console.log('Candidate pair:', report);
+              if (msg.type === 'identify') {
+                // Peer identified themselves
+                setActiveChats(prev => ({
+                  ...prev,
+                  [msg.from]: {
+                    username: msg.from,
+                    channel,
+                    connectionId,
+                    messages: prev[msg.from]?.messages || [],
+                    status: 'connected'
                   }
-                });
-              });
+                }));
+
+                // Update message handler for actual chat messages
+                channel.onmessage = (e) => {
+                  try {
+                    const chatMsg = JSON.parse(e.data);
+                    if (chatMsg.type === 'message') {
+                      setActiveChats(prev => ({
+                        ...prev,
+                        [msg.from]: {
+                          ...prev[msg.from],
+                          messages: [...(prev[msg.from]?.messages || []), {
+                            from: msg.from,
+                            text: chatMsg.text,
+                            timestamp: Date.now()
+                          }]
+                        }
+                      }));
+                    }
+                  } catch (err) {
+                    console.error('Failed to parse chat message:', err);
+                  }
+                };
+
+                // Send acknowledgment
+                channel.send(JSON.stringify({
+                  type: 'identify_ack',
+                  from: myUsername
+                }));
+              }
+            } catch (err) {
+              console.error('Failed to parse identify message:', err);
             }
-          }, 30000);
+          };
+
+          channel.onclose = () => {
+            console.log(`👋 Chat closed: ${connectionId}`);
+            setActiveChats(prev => {
+              const updated = { ...prev };
+              Object.keys(updated).forEach(user => {
+                if (updated[user].connectionId === connectionId) {
+                  updated[user] = { ...updated[user], status: 'disconnected' };
+                }
+              });
+              return updated;
+            });
+          };
+        },
+        onError: (error, context) => {
+          console.error(`Chat service error (${context}):`, error);
         }
       });
 
-      pc.addEventListener('connectionstatechange', () => {
-        console.log('🔌 Connection state:', pc.connectionState);
-        if (pc.connectionState === 'failed') {
-          console.error('❌ Connection failed!');
-          // Log the selected candidate pair to see what was attempted
-          pc.getStats().then(stats => {
-            stats.forEach(report => {
-              if (report.type === 'candidate-pair' && report.selected) {
-                console.log('Selected candidate pair:', report);
-              }
-            });
-          });
-        }
-      });
+      setServiceHandle(handle);
+      console.log('✅ Chat service started');
+    } catch (err) {
+      console.error('Error starting chat service:', err);
+      toast.error(`Failed to start chat: ${err.message}`);
+    }
+  };
 
-      // Log ICE candidate pair changes
-      pc.addEventListener('icecandidate', () => {
-        setTimeout(() => {
-          pc.getStats().then(stats => {
-            stats.forEach(report => {
-              if (report.type === 'candidate-pair' && report.state === 'succeeded') {
-                console.log('✅ ICE candidate pair succeeded:', {
-                  local: report.localCandidateId,
-                  remote: report.remoteCandidateId,
-                  nominated: report.nominated,
-                  state: report.state
-                });
-              } else if (report.type === 'candidate-pair' && report.state === 'failed') {
-                console.log('❌ ICE candidate pair failed:', {
-                  local: report.localCandidateId,
-                  remote: report.remoteCandidateId,
-                  state: report.state
-                });
+  // Add contact
+  const handleAddContact = () => {
+    if (!contactInput || contacts.includes(contactInput)) {
+      toast.error('Invalid or duplicate contact');
+      return;
+    }
+    if (contactInput === myUsername) {
+      toast.error("You can't add yourself!");
+      return;
+    }
+
+    const newContacts = [...contacts, contactInput];
+    setContacts(newContacts);
+    localStorage.setItem('rondevu-chat-contacts', JSON.stringify(newContacts));
+    setContactInput('');
+    toast.success(`Added ${contactInput}`);
+  };
+
+  // Remove contact
+  const handleRemoveContact = (contact) => {
+    const newContacts = contacts.filter(c => c !== contact);
+    setContacts(newContacts);
+    localStorage.setItem('rondevu-chat-contacts', JSON.stringify(newContacts));
+    if (selectedChat === contact) {
+      setSelectedChat(null);
+    }
+    toast.success(`Removed ${contact}`);
+  };
+
+  // Start chat with contact
+  const handleStartChat = async (contact) => {
+    if (!client || activeChats[contact]?.status === 'connected') {
+      setSelectedChat(contact);
+      return;
+    }
+
+    try {
+      toast.loading(`Connecting to ${contact}...`, { id: 'connecting' });
+
+      const { peer, channel } = await client.discovery.connect(contact, 'chat.rondevu@1.0.0', { rtcConfig: RTC_CONFIG });
+
+      // Send identification
+      channel.send(JSON.stringify({
+        type: 'identify',
+        from: myUsername
+      }));
+
+      // Wait for acknowledgment
+      channel.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+
+          if (msg.type === 'identify_ack') {
+            // Connection established
+            toast.success(`Connected to ${contact}`, { id: 'connecting' });
+
+            setActiveChats(prev => ({
+              ...prev,
+              [contact]: {
+                username: contact,
+                channel,
+                peer,
+                messages: prev[contact]?.messages || [],
+                status: 'connected'
               }
-            });
-          });
-        }, 1000);
-      });
+            }));
+            setSelectedChat(contact);
+
+            // Update handler for chat messages
+            channel.onmessage = (e) => {
+              try {
+                const chatMsg = JSON.parse(e.data);
+                if (chatMsg.type === 'message') {
+                  setActiveChats(prev => ({
+                    ...prev,
+                    [contact]: {
+                      ...prev[contact],
+                      messages: [...(prev[contact]?.messages || []), {
+                        from: contact,
+                        text: chatMsg.text,
+                        timestamp: Date.now()
+                      }]
+                    }
+                  }));
+                }
+              } catch (err) {
+                console.error('Failed to parse message:', err);
+              }
+            };
+          }
+        } catch (err) {
+          console.error('Failed to parse ack:', err);
+        }
+      };
+
+      channel.onclose = () => {
+        setActiveChats(prev => ({
+          ...prev,
+          [contact]: { ...prev[contact], status: 'disconnected' }
+        }));
+        toast.error(`Disconnected from ${contact}`);
+      };
+
+    } catch (err) {
+      console.error('Failed to connect:', err);
+      toast.error(`Failed to connect to ${contact}`, { id: 'connecting' });
     }
   };
 
   // Send message
-  const handleSendMessage = (connection) => {
-    if (!messageInput.trim() || !connection.channel) return;
+  const handleSendMessage = (contact) => {
+    const text = messageInputs[contact];
+    if (!text || !activeChats[contact]?.channel) return;
 
-    if (connection.channel.readyState !== 'open') {
-      toast.error('Channel not open yet!');
+    const chat = activeChats[contact];
+    if (chat.status !== 'connected') {
+      toast.error('Not connected');
       return;
     }
 
-    connection.channel.send(messageInput);
-    setMessages(prev => [...prev, {
-      from: 'me',
-      text: messageInput,
-      timestamp: Date.now(),
-      connId: connection.id
-    }]);
-    setMessageInput('');
+    try {
+      chat.channel.send(JSON.stringify({
+        type: 'message',
+        text
+      }));
+
+      setActiveChats(prev => ({
+        ...prev,
+        [contact]: {
+          ...prev[contact],
+          messages: [...prev[contact].messages, {
+            from: myUsername,
+            text,
+            timestamp: Date.now()
+          }]
+        }
+      }));
+
+      setMessageInputs(prev => ({ ...prev, [contact]: '' }));
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      toast.error('Failed to send message');
+    }
   };
 
-  // Clear credentials
-  const handleClearCredentials = () => {
-    localStorage.removeItem('rondevu-credentials');
-    setCredentials(null);
-    setStatus('Not registered');
-    myConnections.forEach(c => c.peer?.close());
-    setMyConnections([]);
-    setMessages([]);
-    setClient(new Rondevu({baseUrl: API_URL}));
+  // Clear all data
+  const handleLogout = () => {
+    if (window.confirm('Are you sure you want to logout? This will clear all data.')) {
+      localStorage.clear();
+      window.location.reload();
+    }
   };
+
+  if (!client) {
+    return <div style={styles.loading}>Loading...</div>;
+  }
 
   return (
     <div style={styles.container}>
-      <Toaster position="top-right"/>
-      <div style={styles.inner}>
-        {/* Header */}
-        <div style={styles.header}>
-          <h1 style={styles.title}>🌐 Rondevu</h1>
-          <p style={styles.subtitle}>Topic-Based Peer Discovery & WebRTC</p>
-          <p style={styles.version}>v0.5.0 - State-Based Peer Manager</p>
-        </div>
+      <Toaster position="top-right" />
 
-        {/* Tabs */}
-        <div style={styles.tabs}>
-          {[
-            {id: 'setup', label: '1️⃣ Setup', icon: '⚙️'},
-            {id: 'offer', label: '2️⃣ Create', icon: '📤'},
-            {id: 'discover', label: '3️⃣ Discover', icon: '🔍'},
-            {id: 'connections', label: '4️⃣ Chat', icon: '💬'}
-          ].map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                ...styles.tab,
-                ...(activeTab === tab.id ? styles.tabActive : {})
-              }}
-            >
-              {tab.icon} {tab.label}
-            </button>
-          ))}
-        </div>
+      {/* Setup Screen */}
+      {setupStep !== 'ready' && (
+        <div style={styles.setupScreen}>
+          <div style={styles.setupBox}>
+            <h1 style={styles.setupTitle}>Rondevu Chat</h1>
+            <p style={styles.setupSubtitle}>Decentralized P2P Chat</p>
 
-        {/* Content */}
-        <div style={styles.content}>
-          {/* Setup Tab */}
-          {activeTab === 'setup' && (
-            <div>
-              <h2>Registration</h2>
-              <p style={styles.desc}>Get your credentials to start connecting</p>
-
-              <div style={{...styles.card, background: credentials ? '#e8f5e9' : '#fff3e0', marginBottom: '20px'}}>
-                <div style={{fontWeight: '600', marginBottom: '10px'}}>Status: {status}</div>
-                {credentials && (
-                  <div style={{fontSize: '0.9em'}}>
-                    <div><strong>Peer ID:</strong> <code>{credentials.peerId.substring(0, 20)}...</code></div>
-                  </div>
-                )}
+            {setupStep === 'register' && (
+              <div>
+                <p style={styles.setupDesc}>Get started by registering with the server</p>
+                <button onClick={handleRegister} style={styles.setupButton}>
+                  Register
+                </button>
               </div>
+            )}
 
-              {!credentials ? (
-                <button onClick={handleRegister} style={styles.btnPrimary}>Register</button>
-              ) : (
-                <div style={{display: 'flex', gap: '10px'}}>
-                  <button onClick={() => setActiveTab('offer')} style={styles.btnPrimary}>Continue →</button>
-                  <button onClick={handleClearCredentials} style={styles.btnDanger}>Clear</button>
+            {setupStep === 'claim' && (
+              <div>
+                <p style={styles.setupDesc}>Choose your unique username</p>
+                <input
+                  type="text"
+                  placeholder="Enter username"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value.toLowerCase())}
+                  onKeyPress={(e) => e.key === 'Enter' && handleClaimUsername()}
+                  style={styles.setupInput}
+                  autoFocus
+                />
+                <button
+                  onClick={handleClaimUsername}
+                  disabled={!usernameInput}
+                  style={styles.setupButton}
+                >
+                  Claim Username
+                </button>
+                <p style={styles.setupHint}>
+                  3-32 characters, lowercase letters, numbers, and dashes only
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Chat Screen */}
+      {setupStep === 'ready' && (
+        <div style={styles.mainScreen}>
+          {/* Sidebar */}
+          <div style={styles.sidebar}>
+            {/* User Header */}
+            <div style={styles.userHeader}>
+              <div>
+                <div style={styles.userHeaderName}>@{myUsername}</div>
+                <div style={styles.userHeaderStatus}>
+                  <span style={styles.onlineDot}></span> Online
                 </div>
-              )}
+              </div>
+              <button onClick={handleLogout} style={styles.logoutBtn} title="Logout">
+                Logout
+              </button>
             </div>
-          )}
 
-          {/* Create Offer Tab */}
-          {activeTab === 'offer' && (
-            <div>
-              <h2>Create Offer</h2>
-              <p style={styles.desc}>Create a WebRTC offer that peers can discover</p>
-
-              {!credentials ? (
-                <div style={{...styles.card, background: '#ffebee', color: '#c62828'}}>
-                  ⚠️ Please register first
-                </div>
-              ) : (
-                <>
-                  <div style={{marginBottom: '20px'}}>
-                    <label style={styles.label}>Topics:</label>
-                    <input
-                      type="text"
-                      value={offerTopics}
-                      onChange={(e) => setOfferTopics(e.target.value)}
-                      placeholder="demo-chat, file-share"
-                      style={styles.input}
-                    />
-                  </div>
-
-                  <button onClick={handleCreateOffer} style={styles.btnPrimary}>
-                    📤 Create Offer
-                  </button>
-
-                  {myConnections.filter(c => c.role === 'offerer').length > 0 && (
-                    <div style={{marginTop: '30px'}}>
-                      <h3>My Offers ({myConnections.filter(c => c.role === 'offerer').length})</h3>
-                      {myConnections.filter(c => c.role === 'offerer').map(conn => (
-                        <div key={conn.id} style={styles.card}>
-                          <div style={{display: 'flex', justifyContent: 'space-between'}}>
-                            <div>
-                              <div style={{fontWeight: '600'}}>{conn.topics.join(', ')}</div>
-                              <div style={{fontSize: '0.85em', color: '#666'}}>
-                                ID: {conn.id.substring(0, 12)}...
-                              </div>
-                            </div>
-                            <div style={{
-                              ...styles.badge,
-                              background: conn.status === 'connected' ? '#4caf50' :
-                                conn.status === 'connecting' ? '#ff9800' : '#999'
-                            }}>
-                              {conn.status}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
+            {/* Add Contact */}
+            <div style={styles.addContactBox}>
+              <input
+                type="text"
+                placeholder="Add friend by username..."
+                value={contactInput}
+                onChange={(e) => setContactInput(e.target.value.toLowerCase())}
+                onKeyPress={(e) => e.key === 'Enter' && handleAddContact()}
+                style={styles.contactInput}
+              />
+              <button onClick={handleAddContact} style={styles.addBtn} title="Add friend">
+                Add
+              </button>
             </div>
-          )}
 
-          {/* Discover Tab */}
-          {activeTab === 'discover' && (
-            <div>
-              <h2>Discover Peers</h2>
-              <p style={styles.desc}>Browse topics to find peers</p>
-
-              {!selectedTopic ? (
-                <div>
-                  <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px'}}>
-                    <h3>Active Topics ({topics.length})</h3>
-                    <button onClick={fetchTopics} style={styles.btnSecondary} disabled={topicsLoading}>
-                      {topicsLoading ? '⟳ Loading...' : '🔄 Refresh'}
-                    </button>
-                  </div>
-
-                  {topicsLoading ? (
-                    <div style={{textAlign: 'center', padding: '60px', color: '#999'}}>
-                      <div style={{fontSize: '3em', marginBottom: '10px'}}>⟳</div>
-                      <div>Loading topics...</div>
-                    </div>
-                  ) : topicsError ? (
-                    <div style={{textAlign: 'center', padding: '40px'}}>
-                      <div style={{...styles.card, background: '#ffebee', color: '#c62828', border: '2px solid #ef9a9a'}}>
-                        <div style={{fontSize: '2em', marginBottom: '10px'}}>⚠️</div>
-                        <div style={{fontWeight: '600', marginBottom: '5px'}}>Failed to load topics</div>
-                        <div style={{fontSize: '0.9em'}}>{topicsError}</div>
-                        <button onClick={fetchTopics} style={{...styles.btnPrimary, marginTop: '15px'}}>
-                          Try Again
-                        </button>
-                      </div>
-                    </div>
-                  ) : topics.length === 0 ? (
-                    <div style={{textAlign: 'center', padding: '60px', color: '#999'}}>
-                      <div style={{fontSize: '3em', marginBottom: '10px'}}>📭</div>
-                      <div style={{fontWeight: '600', marginBottom: '5px'}}>No active topics</div>
-                      <div style={{fontSize: '0.9em'}}>Create an offer to start a new topic</div>
-                    </div>
-                  ) : (
-                    <div style={styles.topicsGrid}>
-                      {topics.map(topic => (
-                        <div
-                          key={topic.topic}
-                          className="topic-card-hover"
-                          onClick={() => handleDiscoverPeers(topic.topic)}
-                        >
-                          <div style={{fontSize: '2.5em', marginBottom: '10px'}}>💬</div>
-                          <div style={{fontWeight: '600', marginBottom: '5px', wordBreak: 'break-word'}}>{topic.topic}</div>
-                          <div style={{
-                            fontSize: '0.85em',
-                            color: '#667eea',
-                            fontWeight: '600',
-                            background: '#f0f2ff',
-                            padding: '4px 12px',
-                            borderRadius: '12px',
-                            display: 'inline-block',
-                            marginTop: '5px'
-                          }}>
-                            {topic.activePeers} {topic.activePeers === 1 ? 'peer' : 'peers'}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {/* Contacts List */}
+            <div style={styles.contactsList}>
+              <div style={styles.contactsHeader}>
+                Friends ({contacts.length})
+              </div>
+              {contacts.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>No friends yet</p>
+                  <p style={{ fontSize: '12px', color: '#999' }}>
+                    Add friends by their username above
+                  </p>
                 </div>
               ) : (
-                <div>
-                  <div style={{marginBottom: '20px'}}>
-                    <button
-                      onClick={() => {
-                        setSelectedTopic(null);
-                        setDiscoveredOffers([]);
-                        fetchTopics(); // Refresh topics when going back
+                contacts.map(contact => {
+                  const isOnline = onlineUsers.has(contact);
+                  const hasActiveChat = activeChats[contact]?.status === 'connected';
+
+                  return (
+                    <div
+                      key={contact}
+                      className="contact-item"
+                      style={{
+                        ...styles.contactItem,
+                        ...(selectedChat === contact ? styles.contactItemActive : {})
                       }}
-                      style={{...styles.btnSecondary, marginBottom: '10px'}}
+                      onClick={() => hasActiveChat ? setSelectedChat(contact) : handleStartChat(contact)}
                     >
-                      ← Back to Topics
-                    </button>
-                    <h3>Topic: {selectedTopic}</h3>
+                      <div style={styles.contactAvatar}>
+                        {contact[0].toUpperCase()}
+                        <span style={{
+                          ...styles.contactDot,
+                          background: isOnline ? '#4caf50' : '#999'
+                        }}></span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={styles.contactName}>{contact}</div>
+                        <div style={styles.contactStatus}>
+                          {hasActiveChat ? 'Chatting' : isOnline ? 'Online' : 'Offline'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveContact(contact);
+                        }}
+                        style={styles.removeBtn}
+                        title="Remove friend"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Chat Area */}
+          <div style={styles.chatArea}>
+            {!selectedChat ? (
+              <div style={styles.emptyChat}>
+                <h2 style={{ margin: 0 }}>Select a friend to chat</h2>
+                <p style={{ marginTop: '10px' }}>
+                  Click on a friend from the sidebar to start chatting
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Chat Header */}
+                <div style={styles.chatHeader}>
+                  <div style={styles.chatHeaderAvatar}>
+                    {selectedChat[0].toUpperCase()}
                   </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.chatHeaderName}>@{selectedChat}</div>
+                    <div style={styles.chatHeaderStatus}>
+                      {activeChats[selectedChat]?.status === 'connected' ? (
+                        <><span style={styles.onlineDot}></span> Connected</>
+                      ) : (
+                        'Connecting...'
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedChat(null)}
+                    style={styles.closeChatBtn}
+                    title="Close chat"
+                  >
+                    ✕
+                  </button>
+                </div>
 
-                  {discoveredOffers.length > 0 ? (
-                    <div>
-                      <p style={{marginBottom: '15px', color: '#666'}}>
-                        Found {discoveredOffers.length} peer(s)
+                {/* Messages */}
+                <div style={styles.messagesArea}>
+                  {(!activeChats[selectedChat] || activeChats[selectedChat].messages.length === 0) ? (
+                    <div style={styles.emptyMessages}>
+                      <p>No messages yet</p>
+                      <p style={{ fontSize: '12px', color: '#999' }}>
+                        Send a message to start the conversation
                       </p>
-                      {discoveredOffers.map(offer => {
-                        const isConnected = myConnections.some(c => c.id === offer.id);
-                        const isMine = credentials && offer.peerId === credentials.peerId;
-
-                        return (
-                          <div key={offer.id} style={styles.card}>
-                            <div style={{marginBottom: '10px'}}>
-                              <div style={{fontWeight: '600'}}>{offer.topics.join(', ')}</div>
-                              <div style={{fontSize: '0.85em', color: '#666'}}>
-                                Peer: {offer.peerId.substring(0, 16)}...
-                              </div>
-                            </div>
-
-                            {isMine ? (
-                              <div style={{...styles.badge, background: '#2196f3'}}>Your offer</div>
-                            ) : isConnected ? (
-                              <div style={{...styles.badge, background: '#4caf50'}}>✓ Connected</div>
-                            ) : (
-                              <button onClick={() => handleAnswerOffer(offer)} style={styles.btnSuccess}>
-                                🤝 Connect
-                              </button>
-                            )}
-                          </div>
-                        );
-                      })}
                     </div>
                   ) : (
-                    <div style={{textAlign: 'center', padding: '40px', color: '#999'}}>
-                      <div style={{fontSize: '3em'}}>🔍</div>
-                      <div>No peers available for this topic</div>
-                      <div style={{fontSize: '0.9em', marginTop: '10px'}}>
-                        Try creating an offer or check back later
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Connections Tab */}
-          {activeTab === 'connections' && (
-            <div>
-              <h2>Active Connections</h2>
-              <p style={styles.desc}>Chat with connected peers</p>
-
-              {myConnections.length === 0 ? (
-                <div style={{textAlign: 'center', padding: '40px', color: '#999'}}>
-                  <div style={{fontSize: '3em'}}>🔌</div>
-                  <div>No connections yet</div>
-                </div>
-              ) : (
-                <div>
-                  {myConnections.map(conn => {
-                    const connMessages = messages.filter(m => m.connId === conn.id);
-
-                    return (
-                      <div key={conn.id} style={{...styles.card, padding: '20px', marginBottom: '20px'}}>
-                        <div style={{display: 'flex', justifyContent: 'space-between', marginBottom: '15px'}}>
-                          <div>
-                            <div style={{fontWeight: '600'}}>{conn.topics.join(', ')}</div>
-                            <div style={{fontSize: '0.85em', color: '#666'}}>Role: {conn.role}</div>
-                          </div>
-                          <div style={{
-                            ...styles.badge,
-                            background: conn.status === 'connected' ? '#4caf50' :
-                              conn.status === 'connecting' ? '#ff9800' : '#999'
-                          }}>
-                            {conn.status === 'connected' ? '🟢 Connected' :
-                              conn.status === 'connecting' ? '🟡 Connecting' : '⚪ Waiting'}
-                          </div>
+                    activeChats[selectedChat].messages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          ...styles.message,
+                          ...(msg.from === myUsername ? styles.messageMe : styles.messageThem)
+                        }}
+                      >
+                        <div style={{
+                          ...styles.messageText,
+                          background: msg.from === myUsername ? '#4a9eff' : '#2a2a2a',
+                          color: 'white'
+                        }}>
+                          {msg.text}
                         </div>
-
-                        {conn.status === 'connected' && (
-                          <>
-                            <div style={styles.messages}>
-                              {connMessages.length === 0 ? (
-                                <div style={{textAlign: 'center', color: '#999', padding: '20px'}}>
-                                  No messages yet. Say hi!
-                                </div>
-                              ) : (
-                                connMessages.map((msg, i) => (
-                                  <div key={i} style={{
-                                    display: 'flex',
-                                    justifyContent: msg.from === 'me' ? 'flex-end' : 'flex-start',
-                                    marginBottom: '10px'
-                                  }}>
-                                    <div style={{
-                                      ...styles.message,
-                                      background: msg.from === 'me' ? '#667eea' : 'white',
-                                      color: msg.from === 'me' ? 'white' : '#333'
-                                    }}>
-                                      <div>{msg.text}</div>
-                                      <div style={{fontSize: '0.75em', opacity: 0.7, marginTop: '4px'}}>
-                                        {new Date(msg.timestamp).toLocaleTimeString()}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))
-                              )}
-                            </div>
-
-                            <div style={{display: 'flex', gap: '10px'}}>
-                              <input
-                                type="text"
-                                value={messageInput}
-                                onChange={(e) => setMessageInput(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleSendMessage(conn)}
-                                placeholder="Type a message..."
-                                style={{...styles.input, flex: 1, margin: 0}}
-                              />
-                              <button onClick={() => handleSendMessage(conn)} style={styles.btnPrimary}>
-                                Send
-                              </button>
-                            </div>
-                          </>
-                        )}
+                        <div style={styles.messageTime}>
+                          {new Date(msg.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
                       </div>
-                    );
-                  })}
+                    ))
+                  )}
+                  <div ref={chatEndRef} />
                 </div>
-              )}
-            </div>
-          )}
-        </div>
 
-        {/* Footer */}
-        <div style={styles.footer}>
-          <p>Server: {API_URL}</p>
-          <p>Open in multiple tabs to test peer-to-peer connections</p>
+                {/* Input */}
+                <div style={styles.inputArea}>
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    value={messageInputs[selectedChat] || ''}
+                    onChange={(e) => setMessageInputs(prev => ({
+                      ...prev,
+                      [selectedChat]: e.target.value
+                    }))}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(selectedChat);
+                      }
+                    }}
+                    disabled={activeChats[selectedChat]?.status !== 'connected'}
+                    style={styles.messageInput}
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSendMessage(selectedChat)}
+                    disabled={!messageInputs[selectedChat] || activeChats[selectedChat]?.status !== 'connected'}
+                    style={styles.sendBtn}
+                    title="Send message"
+                  >
+                    Send
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 const styles = {
   container: {
-    minHeight: '100vh',
-    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    padding: '20px',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif'
+    height: '100vh',
+    background: '#1a1a1a',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
   },
-  inner: {
-    maxWidth: '1200px',
-    margin: '0 auto'
-  },
-  header: {
-    textAlign: 'center',
-    marginBottom: '40px',
-    color: 'white'
-  },
-  title: {
-    fontSize: '3em',
-    margin: '0 0 10px 0',
-    fontWeight: '700'
-  },
-  subtitle: {
-    fontSize: '1.2em',
-    opacity: 0.9,
-    margin: 0
-  },
-  version: {
-    fontSize: '0.9em',
-    opacity: 0.7,
-    margin: '10px 0 0 0'
-  },
-  tabs: {
+  loading: {
+    height: '100vh',
     display: 'flex',
-    gap: '10px',
-    marginBottom: '20px',
-    flexWrap: 'wrap',
-    justifyContent: 'center'
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#e0e0e0',
+    fontSize: '24px'
   },
-  tab: {
-    padding: '12px 24px',
-    background: 'rgba(255,255,255,0.2)',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '1em',
-    fontWeight: '600',
-    transition: 'all 0.3s'
+  setupScreen: {
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px'
   },
-  tabActive: {
-    background: 'white',
-    color: '#667eea',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.15)'
-  },
-  content: {
-    background: 'white',
+  setupBox: {
+    background: '#2a2a2a',
     borderRadius: '16px',
-    padding: '30px',
-    boxShadow: '0 10px 40px rgba(0,0,0,0.2)',
-    minHeight: '500px'
+    padding: '40px',
+    maxWidth: '400px',
+    width: '100%',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+    textAlign: 'center',
+    border: '1px solid #3a3a3a'
   },
-  desc: {
-    color: '#666',
+  setupTitle: {
+    fontSize: '2.5em',
+    margin: '0 0 10px 0',
+    color: '#e0e0e0'
+  },
+  setupSubtitle: {
+    fontSize: '1.1em',
+    color: '#a0a0a0',
+    margin: '0 0 30px 0'
+  },
+  setupDesc: {
+    color: '#a0a0a0',
     marginBottom: '20px'
   },
-  card: {
-    padding: '15px',
-    background: 'white',
-    borderRadius: '8px',
-    border: '1px solid #e0e0e0',
-    boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
-    marginBottom: '10px'
-  },
-  label: {
-    display: 'block',
-    marginBottom: '8px',
-    fontWeight: '600',
-    color: '#333'
-  },
-  input: {
+  setupInput: {
     width: '100%',
-    padding: '12px',
-    fontSize: '1em',
-    border: '2px solid #e0e0e0',
+    padding: '15px',
+    fontSize: '16px',
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
     borderRadius: '8px',
+    marginBottom: '15px',
     boxSizing: 'border-box',
     outline: 'none',
-    marginBottom: '10px'
   },
-  btnPrimary: {
-    padding: '12px 24px',
-    background: '#667eea',
+  setupButton: {
+    width: '100%',
+    padding: '15px',
+    fontSize: '16px',
+    fontWeight: '600',
+    background: '#4a9eff',
     color: 'white',
     border: 'none',
     borderRadius: '8px',
     cursor: 'pointer',
-    fontSize: '1em',
-    fontWeight: '600',
-    boxShadow: '0 4px 12px rgba(102, 126, 234, 0.3)'
   },
-  btnSuccess: {
-    padding: '10px 20px',
+  setupHint: {
+    fontSize: '12px',
+    color: '#808080',
+    marginTop: '10px'
+  },
+  mainScreen: {
+    height: '100vh',
+    display: 'flex'
+  },
+  sidebar: {
+    width: '320px',
+    background: '#2a2a2a',
+    borderRight: '1px solid #3a3a3a',
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  userHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  userHeaderName: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  userHeaderStatus: {
+    fontSize: '12px',
+    color: '#a0a0a0',
+    marginTop: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px'
+  },
+  onlineDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
     background: '#4caf50',
-    color: 'white',
+    display: 'inline-block'
+  },
+  logoutBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    color: '#e0e0e0',
     border: 'none',
-    borderRadius: '8px',
+    borderRadius: '6px',
     cursor: 'pointer',
-    fontSize: '0.95em',
-    fontWeight: '600',
-    width: '100%'
+    fontSize: '14px'
   },
-  btnSecondary: {
-    padding: '10px 20px',
-    background: '#f5f5f5',
-    color: '#333',
-    border: '2px solid #e0e0e0',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '0.95em',
-    fontWeight: '600'
+  addContactBox: {
+    padding: '15px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    gap: '8px'
   },
-  btnDanger: {
-    padding: '12px 24px',
-    background: '#f44336',
-    color: 'white',
-    border: 'none',
-    borderRadius: '8px',
-    cursor: 'pointer',
-    fontSize: '1em',
-    fontWeight: '600'
-  },
-  badge: {
-    padding: '6px 14px',
-    color: 'white',
-    borderRadius: '12px',
-    fontSize: '0.85em',
-    fontWeight: '600'
-  },
-  messages: {
-    height: '200px',
-    overflowY: 'auto',
+  contactInput: {
+    flex: 1,
     padding: '10px',
-    background: '#f5f5f5',
-    borderRadius: '8px',
-    marginBottom: '10px'
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    borderRadius: '6px',
+    fontSize: '14px',
+    outline: 'none'
+  },
+  addBtn: {
+    padding: '10px 15px',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px'
+  },
+  contactsList: {
+    flex: 1,
+    overflowY: 'auto'
+  },
+  contactsHeader: {
+    padding: '15px 20px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#808080',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
+  },
+  emptyState: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    color: '#808080'
+  },
+  contactItem: {
+    padding: '15px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+    borderBottom: '1px solid #3a3a3a'
+  },
+  contactItemActive: {
+    background: '#3a3a3a'
+  },
+  contactAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    background: '#4a9eff',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    fontWeight: '600',
+    position: 'relative'
+  },
+  contactDot: {
+    position: 'absolute',
+    bottom: '0',
+    right: '0',
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    border: '2px solid #2a2a2a'
+  },
+  contactName: {
+    fontSize: '15px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  contactStatus: {
+    fontSize: '12px',
+    color: '#a0a0a0',
+    marginTop: '2px'
+  },
+  removeBtn: {
+    padding: '4px 8px',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '16px',
+    color: '#808080',
+    opacity: 0.6,
+  },
+  chatArea: {
+    flex: 1,
+    background: '#1a1a1a',
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  emptyChat: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#808080'
+  },
+  chatHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    background: '#2a2a2a'
+  },
+  chatHeaderAvatar: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    background: '#4a9eff',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '20px',
+    fontWeight: '600'
+  },
+  chatHeaderName: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  chatHeaderStatus: {
+    fontSize: '13px',
+    color: '#a0a0a0',
+    marginTop: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px'
+  },
+  closeChatBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    color: '#e0e0e0'
+  },
+  messagesArea: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '20px',
+    background: '#1a1a1a'
+  },
+  emptyMessages: {
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#808080'
   },
   message: {
-    maxWidth: '70%',
-    padding: '8px 12px',
-    borderRadius: '8px',
-    boxShadow: '0 1px 2px rgba(0,0,0,0.1)'
+    marginBottom: '12px',
+    display: 'flex',
+    flexDirection: 'column',
+    maxWidth: '70%'
   },
-  footer: {
-    marginTop: '40px',
-    textAlign: 'center',
+  messageMe: {
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end'
+  },
+  messageThem: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start'
+  },
+  messageText: {
+    padding: '12px 16px',
+    borderRadius: '16px',
+    fontSize: '15px',
+    lineHeight: '1.4',
+    wordWrap: 'break-word',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+  },
+  messageTime: {
+    fontSize: '11px',
+    color: '#808080',
+    marginTop: '4px',
+    padding: '0 8px'
+  },
+  inputArea: {
+    padding: '20px',
+    borderTop: '1px solid #3a3a3a',
+    display: 'flex',
+    gap: '12px',
+    background: '#2a2a2a'
+  },
+  messageInput: {
+    flex: 1,
+    padding: '12px 16px',
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    borderRadius: '24px',
+    fontSize: '15px',
+    outline: 'none',
+  },
+  sendBtn: {
+    padding: '12px 24px',
+    borderRadius: '24px',
+    background: '#4a9eff',
     color: 'white',
-    opacity: 0.8,
-    fontSize: '0.9em'
-  },
-  topicsGrid: {
-    display: 'grid',
-    gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))',
-    gap: '15px',
-    marginTop: '20px'
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '15px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   }
 };
+
+// Add hover effects via CSS
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent = `
+    button:hover:not(:disabled) {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+    button:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .contact-item:hover {
+      background: #333333 !important;
+    }
+    .contact-item:active {
+      background: #2a2a2a !important;
+    }
+    input:focus {
+      border-color: #4a9eff !important;
+    }
+  `;
+  document.head.appendChild(style);
+}
