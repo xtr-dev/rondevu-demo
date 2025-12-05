@@ -179,6 +179,7 @@ export default function App() {
         privateKey: keypair.privateKey,
         serviceFqn: 'chat.rondevu@1.0.0',
         isPublic: true,
+        ttl: 300000, // 5 minutes - service stays alive while page is open
         poolSize: 10, // Support up to 10 simultaneous connections
         rtcConfig: RTC_CONFIG,
         handler: (channel, peer, connectionId) => {
