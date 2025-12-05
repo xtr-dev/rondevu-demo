@@ -41,37 +41,64 @@ export default function App() {
   const [serviceHandle, setServiceHandle] = useState(null);
   const chatEndRef = useRef(null);
 
-  // Load saved data
+  // Load saved data and auto-register
   useEffect(() => {
     const savedCreds = localStorage.getItem('rondevu-chat-credentials');
     const savedUsername = localStorage.getItem('rondevu-chat-username');
     const savedContacts = localStorage.getItem('rondevu-chat-contacts');
 
-    if (savedCreds) {
+    const initialize = async () => {
+      let clientInstance;
+
+      if (savedCreds) {
+        try {
+          const creds = JSON.parse(savedCreds);
+          setCredentials(creds);
+          clientInstance = new Rondevu({ baseUrl: API_URL, credentials: creds });
+          setClient(clientInstance);
+        } catch (err) {
+          console.error('Failed to load credentials:', err);
+          clientInstance = new Rondevu({ baseUrl: API_URL });
+          setClient(clientInstance);
+          // Auto-register if saved creds are invalid
+          await autoRegister(clientInstance);
+        }
+      } else {
+        // No saved credentials - auto-register
+        clientInstance = new Rondevu({ baseUrl: API_URL });
+        setClient(clientInstance);
+        await autoRegister(clientInstance);
+      }
+
+      if (savedUsername) {
+        setMyUsername(savedUsername);
+        setSetupStep('ready');
+      }
+
+      if (savedContacts) {
+        try {
+          setContacts(JSON.parse(savedContacts));
+        } catch (err) {
+          console.error('Failed to load contacts:', err);
+        }
+      }
+    };
+
+    const autoRegister = async (clientInstance) => {
       try {
-        const creds = JSON.parse(savedCreds);
+        const creds = await clientInstance.register();
         setCredentials(creds);
-        setClient(new Rondevu({ baseUrl: API_URL, credentials: creds }));
+        localStorage.setItem('rondevu-chat-credentials', JSON.stringify(creds));
+        const newClient = new Rondevu({ baseUrl: API_URL, credentials: creds });
+        setClient(newClient);
+        setSetupStep('claim');
       } catch (err) {
-        console.error('Failed to load credentials:', err);
-        setClient(new Rondevu({ baseUrl: API_URL }));
+        console.error('Auto-registration failed:', err);
+        toast.error(`Registration failed: ${err.message}`);
       }
-    } else {
-      setClient(new Rondevu({ baseUrl: API_URL }));
-    }
+    };
 
-    if (savedUsername) {
-      setMyUsername(savedUsername);
-      setSetupStep('ready');
-    }
-
-    if (savedContacts) {
-      try {
-        setContacts(JSON.parse(savedContacts));
-      } catch (err) {
-        console.error('Failed to load contacts:', err);
-      }
-    }
+    initialize();
   }, []);
 
   // Auto-scroll chat
@@ -110,21 +137,6 @@ export default function App() {
 
     return () => clearInterval(interval);
   }, [contacts, setupStep, client]);
-
-  // Register
-  const handleRegister = async () => {
-    if (!client) return;
-    try {
-      const creds = await client.register();
-      setCredentials(creds);
-      localStorage.setItem('rondevu-chat-credentials', JSON.stringify(creds));
-      setClient(new Rondevu({ baseUrl: API_URL, credentials: creds }));
-      setSetupStep('claim');
-      toast.success('Registered!');
-    } catch (err) {
-      toast.error(`Error: ${err.message}`);
-    }
-  };
 
   // Claim username
   const handleClaimUsername = async () => {
@@ -409,10 +421,7 @@ export default function App() {
 
             {setupStep === 'register' && (
               <div>
-                <p style={styles.setupDesc}>Get started by registering with the server</p>
-                <button onClick={handleRegister} style={styles.setupButton}>
-                  Register
-                </button>
+                <p style={styles.setupDesc}>Registering...</p>
               </div>
             )}
 
