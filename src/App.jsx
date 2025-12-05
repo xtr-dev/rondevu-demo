@@ -50,31 +50,7 @@ export default function App() {
     const initialize = async () => {
       let clientInstance;
 
-      if (savedCreds) {
-        try {
-          const creds = JSON.parse(savedCreds);
-          setCredentials(creds);
-          clientInstance = new Rondevu({ baseUrl: API_URL, credentials: creds });
-          setClient(clientInstance);
-        } catch (err) {
-          console.error('Failed to load credentials:', err);
-          clientInstance = new Rondevu({ baseUrl: API_URL });
-          setClient(clientInstance);
-          // Auto-register if saved creds are invalid
-          await autoRegister(clientInstance);
-        }
-      } else {
-        // No saved credentials - auto-register
-        clientInstance = new Rondevu({ baseUrl: API_URL });
-        setClient(clientInstance);
-        await autoRegister(clientInstance);
-      }
-
-      if (savedUsername) {
-        setMyUsername(savedUsername);
-        setSetupStep('ready');
-      }
-
+      // Load contacts first
       if (savedContacts) {
         try {
           setContacts(JSON.parse(savedContacts));
@@ -82,11 +58,44 @@ export default function App() {
           console.error('Failed to load contacts:', err);
         }
       }
+
+      // Handle credentials
+      if (savedCreds) {
+        try {
+          const creds = JSON.parse(savedCreds);
+          setCredentials(creds);
+          clientInstance = new Rondevu({ baseUrl: API_URL, credentials: creds });
+          setClient(clientInstance);
+
+          // If we have username too, go straight to ready
+          if (savedUsername) {
+            setMyUsername(savedUsername);
+            setSetupStep('ready');
+          } else {
+            // Have creds but no username - go to claim step
+            setSetupStep('claim');
+          }
+        } catch (err) {
+          console.error('Failed to load credentials:', err);
+          // Invalid saved creds - auto-register
+          clientInstance = new Rondevu({ baseUrl: API_URL });
+          setClient(clientInstance);
+          await autoRegister(clientInstance);
+        }
+      } else {
+        // No saved credentials - auto-register
+        console.log('No saved credentials, auto-registering...');
+        clientInstance = new Rondevu({ baseUrl: API_URL });
+        setClient(clientInstance);
+        await autoRegister(clientInstance);
+      }
     };
 
     const autoRegister = async (clientInstance) => {
       try {
+        console.log('Starting auto-registration...');
         const creds = await clientInstance.register();
+        console.log('Registration successful:', creds);
         setCredentials(creds);
         localStorage.setItem('rondevu-chat-credentials', JSON.stringify(creds));
         const newClient = new Rondevu({ baseUrl: API_URL, credentials: creds });
@@ -95,6 +104,7 @@ export default function App() {
       } catch (err) {
         console.error('Auto-registration failed:', err);
         toast.error(`Registration failed: ${err.message}`);
+        setSetupStep('claim'); // Still allow username claim, might work anyway
       }
     };
 
