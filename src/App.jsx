@@ -6,19 +6,20 @@ const API_URL = 'https://api.ronde.vu';
 
 const RTC_CONFIG = {
   iceServers: [
-    { urls: ["stun:stun.ronde.vu:3478"] },
+    { urls: ["stun:stun.share.fish:3478"] },
     {
       urls: [
-        "turn:turn.ronde.vu:3478?transport=tcp",
-        "turn:turn.ronde.vu:3478?transport=udp",
+        // TURNS (secure) - TLS/DTLS on port 5349
+        "turns:turn.share.fish:5349?transport=tcp",
+        "turns:turn.share.fish:5349?transport=udp",
+        // TURN (fallback) - plain on port 3478
+        "turn:turn.share.fish:3478?transport=tcp",
+        "turn:turn.share.fish:3478?transport=udp",
       ],
       username: "webrtcuser",
       credential: "supersecretpassword"
     }
   ],
-  // Force TURN relay to bypass NAT hairpinning (when testing on same network)
-  // Comment out for production to allow direct connections when possible
-  iceTransportPolicy: 'relay'
 };
 
 export default function App() {

@@ -6,11 +6,36 @@
 
 When configuring TURN servers:
 
-- ✅ **DO** include the port number in TURN URLs: `turn:server.com:3478`
+- ✅ **DO** use TURNS (secure) on port 5349 when available: `turns:server.com:5349`
+- ✅ **DO** include TURN fallback on port 3478: `turn:server.com:3478`
+- ✅ **DO** include the port number in TURN URLs (even if default)
 - ✅ **DO** test TURN connectivity before deploying: `turnutils_uclient -u user -w pass server.com 3478 -y`
 - ✅ **DO** provide both TCP and UDP transports for maximum compatibility
-- ❌ **DON'T** omit the port number (even if it's the default 3478)
+- ❌ **DON'T** omit the port number
 - ❌ **DON'T** assume TURN works without testing
+
+**Current Configuration:**
+```javascript
+const RTC_CONFIG = {
+  iceServers: [
+    { urls: ["stun:stun.share.fish:3478"] },
+    {
+      urls: [
+        // TURNS (secure) - TLS/DTLS on port 5349 (preferred)
+        "turns:turn.share.fish:5349?transport=tcp",
+        "turns:turn.share.fish:5349?transport=udp",
+        // TURN (fallback) - plain on port 3478
+        "turn:turn.share.fish:3478?transport=tcp",
+        "turn:turn.share.fish:3478?transport=udp",
+      ],
+      username: "webrtcuser",
+      credential: "supersecretpassword"
+    }
+  ]
+};
+```
+
+WebRTC will try TURNS (secure) endpoints first, falling back to plain TURN if needed.
 
 ### ICE Configuration
 
