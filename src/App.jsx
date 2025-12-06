@@ -15,7 +15,10 @@ const RTC_CONFIG = {
       username: "webrtcuser",
       credential: "supersecretpassword"
     }
-  ]
+  ],
+  // Force TURN relay to bypass NAT hairpinning (when testing on same network)
+  // Comment out for production to allow direct connections when possible
+  iceTransportPolicy: 'relay'
 };
 
 export default function App() {
