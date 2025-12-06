@@ -337,8 +337,8 @@ export default function App() {
         maxReconnectAttempts: 5
       });
 
-      // Create data channel
-      const channel = connection.createChannel('chat');
+      // Create data channel (must match service pool's channel name)
+      const channel = connection.createChannel('rondevu-service');
 
       // Listen for connection events
       connection.on('connected', () => {
