@@ -124,6 +124,8 @@ export default function App() {
   }, [setupStep, myUsername, client]);
 
   // Check online status periodically
+  // Note: Online detection by attempting to query services
+  // In v0.9.0 there's no direct listServices API, so we check by attempting connection
   useEffect(() => {
     if (setupStep !== 'ready' || !client) return;
 
@@ -131,8 +133,14 @@ export default function App() {
       const online = new Set();
       for (const contact of contacts) {
         try {
-          const services = await client.discovery.listServices(contact);
-          if (services.services.some(s => s.serviceFqn === 'chat.rondevu@1.0.0')) {
+          // Try to query the service via discovery endpoint
+          const response = await fetch(`${API_URL}/index/${contact}/query`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ serviceFqn: 'chat.rondevu@1.0.0' })
+          });
+
+          if (response.ok) {
             online.add(contact);
           }
         } catch (err) {
@@ -163,7 +171,7 @@ export default function App() {
     }
   };
 
-  // Start pooled chat service
+  // Start pooled chat service with durable connections
   const startChatService = async () => {
     if (!client || !myUsername || serviceHandle) return;
 
@@ -174,21 +182,22 @@ export default function App() {
         return;
       }
 
-      const handle = await client.services.exposeService({
+      const service = await client.exposeService({
         username: myUsername,
         privateKey: keypair.privateKey,
         serviceFqn: 'chat.rondevu@1.0.0',
         isPublic: true,
-        ttl: 300000, // 5 minutes - service stays alive while page is open
+        ttl: 300000, // 5 minutes - service auto-refreshes
+        ttlRefreshMargin: 0.2, // Refresh at 80% of TTL
         poolSize: 10, // Support up to 10 simultaneous connections
         rtcConfig: RTC_CONFIG,
-        handler: (channel, peer, connectionId) => {
+        handler: (channel, connectionId) => {
           console.log(`📡 New chat connection: ${connectionId}`);
 
           // Wait for peer to identify themselves
-          channel.onmessage = (event) => {
+          channel.on('message', (data) => {
             try {
-              const msg = JSON.parse(event.data);
+              const msg = JSON.parse(data);
 
               if (msg.type === 'identify') {
                 // Peer identified themselves
@@ -203,10 +212,11 @@ export default function App() {
                   }
                 }));
 
-                // Update message handler for actual chat messages
-                channel.onmessage = (e) => {
+                // Remove old handler and add new one for chat messages
+                channel.off('message');
+                channel.on('message', (chatData) => {
                   try {
-                    const chatMsg = JSON.parse(e.data);
+                    const chatMsg = JSON.parse(chatData);
                     if (chatMsg.type === 'message') {
                       setActiveChats(prev => ({
                         ...prev,
@@ -223,7 +233,7 @@ export default function App() {
                   } catch (err) {
                     console.error('Failed to parse chat message:', err);
                   }
-                };
+                });
 
                 // Send acknowledgment
                 channel.send(JSON.stringify({
@@ -234,9 +244,9 @@ export default function App() {
             } catch (err) {
               console.error('Failed to parse identify message:', err);
             }
-          };
+          });
 
-          channel.onclose = () => {
+          channel.on('close', () => {
             console.log(`👋 Chat closed: ${connectionId}`);
             setActiveChats(prev => {
               const updated = { ...prev };
@@ -247,14 +257,31 @@ export default function App() {
               });
               return updated;
             });
-          };
-        },
-        onError: (error, context) => {
-          console.error(`Chat service error (${context}):`, error);
+          });
         }
       });
 
-      setServiceHandle(handle);
+      // Start the service
+      await service.start();
+
+      // Listen for service events
+      service.on('connection', (connId) => {
+        console.log(`🔗 New connection: ${connId}`);
+      });
+
+      service.on('disconnection', (connId) => {
+        console.log(`🔌 Disconnected: ${connId}`);
+      });
+
+      service.on('ttl-refreshed', (expiresAt) => {
+        console.log(`🔄 Service TTL refreshed, expires at: ${new Date(expiresAt)}`);
+      });
+
+      service.on('error', (error, context) => {
+        console.error(`❌ Service error (${context}):`, error);
+      });
+
+      setServiceHandle(service);
       console.log('✅ Chat service started');
     } catch (err) {
       console.error('Error starting chat service:', err);
@@ -291,7 +318,7 @@ export default function App() {
     toast.success(`Removed ${contact}`);
   };
 
-  // Start chat with contact
+  // Start chat with contact using durable connection
   const handleStartChat = async (contact) => {
     if (!client || activeChats[contact]?.status === 'connected') {
       setSelectedChat(contact);
@@ -301,18 +328,46 @@ export default function App() {
     try {
       toast.loading(`Connecting to ${contact}...`, { id: 'connecting' });
 
-      const { peer, channel } = await client.discovery.connect(contact, 'chat.rondevu@1.0.0', { rtcConfig: RTC_CONFIG });
+      // Create durable connection
+      const connection = await client.connect(contact, 'chat.rondevu@1.0.0', {
+        rtcConfig: RTC_CONFIG,
+        maxReconnectAttempts: 5
+      });
 
-      // Send identification
-      channel.send(JSON.stringify({
-        type: 'identify',
-        from: myUsername
-      }));
+      // Create data channel
+      const channel = connection.createChannel('chat');
+
+      // Listen for connection events
+      connection.on('connected', () => {
+        console.log(`✅ Connected to ${contact}`);
+      });
+
+      connection.on('reconnecting', (attempt, max, delay) => {
+        console.log(`🔄 Reconnecting to ${contact} (${attempt}/${max}) in ${delay}ms`);
+        toast.loading(`Reconnecting to ${contact}...`, { id: 'reconnecting' });
+      });
+
+      connection.on('disconnected', () => {
+        console.log(`🔌 Disconnected from ${contact}`);
+        setActiveChats(prev => ({
+          ...prev,
+          [contact]: { ...prev[contact], status: 'reconnecting' }
+        }));
+      });
+
+      connection.on('failed', (error) => {
+        console.error(`❌ Connection to ${contact} failed:`, error);
+        toast.error(`Connection to ${contact} failed`, { id: 'connecting' });
+        setActiveChats(prev => ({
+          ...prev,
+          [contact]: { ...prev[contact], status: 'disconnected' }
+        }));
+      });
 
       // Wait for acknowledgment
-      channel.onmessage = (event) => {
+      channel.on('message', (data) => {
         try {
-          const msg = JSON.parse(event.data);
+          const msg = JSON.parse(data);
 
           if (msg.type === 'identify_ack') {
             // Connection established
@@ -323,7 +378,7 @@ export default function App() {
               [contact]: {
                 username: contact,
                 channel,
-                peer,
+                connection,
                 messages: prev[contact]?.messages || [],
                 status: 'connected'
               }
@@ -331,9 +386,10 @@ export default function App() {
             setSelectedChat(contact);
 
             // Update handler for chat messages
-            channel.onmessage = (e) => {
+            channel.off('message');
+            channel.on('message', (chatData) => {
               try {
-                const chatMsg = JSON.parse(e.data);
+                const chatMsg = JSON.parse(chatData);
                 if (chatMsg.type === 'message') {
                   setActiveChats(prev => ({
                     ...prev,
@@ -350,20 +406,28 @@ export default function App() {
               } catch (err) {
                 console.error('Failed to parse message:', err);
               }
-            };
+            });
           }
         } catch (err) {
           console.error('Failed to parse ack:', err);
         }
-      };
+      });
 
-      channel.onclose = () => {
+      channel.on('close', () => {
         setActiveChats(prev => ({
           ...prev,
           [contact]: { ...prev[contact], status: 'disconnected' }
         }));
         toast.error(`Disconnected from ${contact}`);
-      };
+      });
+
+      // Connect and send identification
+      await connection.connect();
+
+      channel.send(JSON.stringify({
+        type: 'identify',
+        from: myUsername
+      }));
 
     } catch (err) {
       console.error('Failed to connect:', err);
