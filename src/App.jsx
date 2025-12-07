@@ -4,22 +4,72 @@ import toast, { Toaster } from 'react-hot-toast';
 
 const API_URL = 'https://api.ronde.vu';
 
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: ["stun:stun.share.fish:3478"] },
-    {
-      urls: [
-        // TURNS (secure) - TLS/DTLS on port 5349
-        "turns:turn.share.fish:5349?transport=tcp",
-        "turns:turn.share.fish:5349?transport=udp",
-        // TURN (fallback) - plain on port 3478
-        "turn:turn.share.fish:3478?transport=tcp",
-        "turn:turn.share.fish:3478?transport=udp",
+// Preset RTC configurations
+const RTC_PRESETS = {
+  'ipv4-turn': {
+    name: 'IPv4 TURN (Recommended)',
+    config: {
+      iceServers: [
+        { urls: ["stun:57.129.61.67:3478"] },
+        {
+          urls: [
+            "turn:57.129.61.67:3478?transport=tcp",
+            "turn:57.129.61.67:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
       ],
-      username: "webrtcuser",
-      credential: "supersecretpassword"
     }
-  ],
+  },
+  'hostname-turns': {
+    name: 'Hostname TURNS (TLS)',
+    config: {
+      iceServers: [
+        { urls: ["stun:turn.share.fish:3478"] },
+        {
+          urls: [
+            "turns:turn.share.fish:5349?transport=tcp",
+            "turns:turn.share.fish:5349?transport=udp",
+            "turn:turn.share.fish:3478?transport=tcp",
+            "turn:turn.share.fish:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
+      ],
+    }
+  },
+  'google-stun': {
+    name: 'Google STUN Only',
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    }
+  },
+  'relay-only': {
+    name: 'Force TURN Relay (Testing)',
+    config: {
+      iceServers: [
+        { urls: ["stun:57.129.61.67:3478"] },
+        {
+          urls: [
+            "turn:57.129.61.67:3478?transport=tcp",
+            "turn:57.129.61.67:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
+      ],
+      iceTransportPolicy: 'relay'
+    }
+  },
+  'custom': {
+    name: 'Custom Configuration',
+    config: null // Will be loaded from user input
+  }
 };
 
 export default function App() {
@@ -44,6 +94,48 @@ export default function App() {
   // Service
   const [serviceHandle, setServiceHandle] = useState(null);
   const chatEndRef = useRef(null);
+
+  // Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [rtcPreset, setRtcPreset] = useState('ipv4-turn');
+  const [customRtcConfig, setCustomRtcConfig] = useState('');
+
+  // Get current RTC configuration
+  const getCurrentRtcConfig = () => {
+    if (rtcPreset === 'custom') {
+      try {
+        return JSON.parse(customRtcConfig);
+      } catch (err) {
+        console.error('Invalid custom RTC config:', err);
+        return RTC_PRESETS['ipv4-turn'].config;
+      }
+    }
+    return RTC_PRESETS[rtcPreset]?.config || RTC_PRESETS['ipv4-turn'].config;
+  };
+
+  // Load saved settings
+  useEffect(() => {
+    const savedPreset = localStorage.getItem('rondevu-rtc-preset');
+    const savedCustomConfig = localStorage.getItem('rondevu-rtc-custom');
+
+    if (savedPreset) {
+      setRtcPreset(savedPreset);
+    }
+    if (savedCustomConfig) {
+      setCustomRtcConfig(savedCustomConfig);
+    }
+  }, []);
+
+  // Save settings when they change
+  useEffect(() => {
+    localStorage.setItem('rondevu-rtc-preset', rtcPreset);
+  }, [rtcPreset]);
+
+  useEffect(() => {
+    if (customRtcConfig) {
+      localStorage.setItem('rondevu-rtc-custom', customRtcConfig);
+    }
+  }, [customRtcConfig]);
 
   // Load saved data and auto-register
   useEffect(() => {
@@ -194,7 +286,7 @@ export default function App() {
         ttl: 300000, // 5 minutes - service auto-refreshes
         ttlRefreshMargin: 0.2, // Refresh at 80% of TTL
         poolSize: 10, // Support up to 10 simultaneous connections
-        rtcConfig: RTC_CONFIG,
+        rtcConfig: getCurrentRtcConfig(),
         handler: (channel, connectionId) => {
           console.log(`📡 New chat connection: ${connectionId}`);
 
@@ -334,7 +426,7 @@ export default function App() {
 
       // Create durable connection
       const connection = await client.connect(contact, 'chat.rondevu@1.0.0', {
-        rtcConfig: RTC_CONFIG,
+        rtcConfig: getCurrentRtcConfig(),
         maxReconnectAttempts: 5
       });
 
@@ -491,6 +583,67 @@ export default function App() {
     <div style={styles.container}>
       <Toaster position="top-right" />
 
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={styles.modalOverlay} onClick={() => setShowSettings(false)}>
+          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>WebRTC Configuration</h2>
+
+            <div style={styles.settingsSection}>
+              <label style={styles.settingsLabel}>
+                Preset Configuration:
+              </label>
+              <select
+                value={rtcPreset}
+                onChange={(e) => setRtcPreset(e.target.value)}
+                style={styles.settingsSelect}
+              >
+                {Object.entries(RTC_PRESETS).map(([key, preset]) => (
+                  <option key={key} value={key}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {rtcPreset === 'custom' && (
+              <div style={styles.settingsSection}>
+                <label style={styles.settingsLabel}>
+                  Custom RTC Configuration (JSON):
+                </label>
+                <textarea
+                  value={customRtcConfig}
+                  onChange={(e) => setCustomRtcConfig(e.target.value)}
+                  placeholder={JSON.stringify(RTC_PRESETS['ipv4-turn'].config, null, 2)}
+                  style={styles.settingsTextarea}
+                  rows={15}
+                />
+                <p style={styles.settingsHint}>
+                  Enter valid RTCConfiguration JSON
+                </p>
+              </div>
+            )}
+
+            {rtcPreset !== 'custom' && (
+              <div style={styles.settingsSection}>
+                <label style={styles.settingsLabel}>
+                  Current Configuration:
+                </label>
+                <pre style={styles.settingsPreview}>
+                  {JSON.stringify(getCurrentRtcConfig(), null, 2)}
+                </pre>
+              </div>
+            )}
+
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowSettings(false)} style={styles.modalBtn}>
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Setup Screen */}
       {setupStep !== 'ready' && (
         <div style={styles.setupScreen}>
@@ -545,9 +698,14 @@ export default function App() {
                   <span style={styles.onlineDot}></span> Online
                 </div>
               </div>
-              <button onClick={handleLogout} style={styles.logoutBtn} title="Logout">
-                Logout
-              </button>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setShowSettings(true)} style={styles.settingsBtn} title="Settings">
+                  ⚙️
+                </button>
+                <button onClick={handleLogout} style={styles.logoutBtn} title="Logout">
+                  Logout
+                </button>
+              </div>
             </div>
 
             {/* Add Contact */}
@@ -843,6 +1001,16 @@ const styles = {
     background: '#4caf50',
     display: 'inline-block'
   },
+  settingsBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    color: '#e0e0e0',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '18px',
+    lineHeight: '1'
+  },
   logoutBtn: {
     padding: '8px 12px',
     background: '#3a3a3a',
@@ -1074,6 +1242,100 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.8)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  },
+  modalContent: {
+    background: '#2a2a2a',
+    borderRadius: '12px',
+    padding: '24px',
+    maxWidth: '600px',
+    width: '90%',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)'
+  },
+  modalTitle: {
+    fontSize: '24px',
+    color: '#e0e0e0',
+    marginBottom: '20px',
+    fontWeight: '600'
+  },
+  settingsSection: {
+    marginBottom: '20px'
+  },
+  settingsLabel: {
+    display: 'block',
+    color: '#e0e0e0',
+    marginBottom: '8px',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  settingsSelect: {
+    width: '100%',
+    padding: '10px',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '14px',
+    outline: 'none',
+    cursor: 'pointer'
+  },
+  settingsTextarea: {
+    width: '100%',
+    padding: '12px',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontFamily: 'monospace',
+    outline: 'none',
+    resize: 'vertical'
+  },
+  settingsPreview: {
+    width: '100%',
+    padding: '12px',
+    background: '#1a1a1a',
+    color: '#4a9eff',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontFamily: 'monospace',
+    overflowX: 'auto',
+    margin: 0
+  },
+  settingsHint: {
+    fontSize: '12px',
+    color: '#808080',
+    marginTop: '6px'
+  },
+  modalActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    marginTop: '24px'
+  },
+  modalBtn: {
+    padding: '10px 20px',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600'
   }
 };
 
