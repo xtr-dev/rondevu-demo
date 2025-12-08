@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react'
-import { RondevuService, ServiceHost, ServiceClient } from '@xtr-dev/rondevu-client'
+import { RondevuService, RondevuSignaler, WebRTCContext, RTCDurableConnection, ServiceHost, ServiceClient } from '@xtr-dev/rondevu-client'
 import toast, { Toaster } from 'react-hot-toast'
 
 const API_URL = 'https://api.ronde.vu'
