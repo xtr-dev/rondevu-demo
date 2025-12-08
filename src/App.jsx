@@ -70,9 +70,26 @@ export default function App() {
                 await service.initialize()
                 setRondevuService(service)
 
-                if (savedUsername && service.isUsernameClaimed()) {
-                    setMyUsername(savedUsername)
-                    setSetupStep('ready')
+                // Check if we have a saved username and it's still valid
+                if (savedUsername && savedKeypair) {
+                    try {
+                        // Verify the username is still claimed by checking with the server
+                        const isClaimed = await service.isUsernameClaimed()
+                        if (isClaimed) {
+                            setMyUsername(savedUsername)
+                            setSetupStep('ready')
+                            console.log('Restored session for username:', savedUsername)
+                            toast.success(`Welcome back, ${savedUsername}!`, { duration: 3000 })
+                        } else {
+                            // Username expired or was never properly claimed
+                            console.log('Saved username is no longer valid, need to reclaim')
+                            setSetupStep('claim')
+                        }
+                    } catch (err) {
+                        console.error('Failed to verify username claim:', err)
+                        // Keep the saved data but require reclaim
+                        setSetupStep('claim')
+                    }
                 } else {
                     setSetupStep('claim')
                 }
