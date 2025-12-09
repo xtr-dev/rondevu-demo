@@ -147,6 +147,9 @@ export default function App() {
         const savedKeypair = localStorage.getItem('rondevu-keypair');
         const savedContacts = localStorage.getItem('rondevu-contacts');
 
+        console.log('[Init] Saved username:', savedUsername);
+        console.log('[Init] Has saved keypair:', !!savedKeypair);
+
         // Load contacts
         if (savedContacts) {
           try {
@@ -168,12 +171,16 @@ export default function App() {
         setRondevu(service);
 
         if (savedUsername && savedKeypair) {
+          console.log('[Init] Checking if username is claimed...');
           const isClaimed = await service.isUsernameClaimed();
+          console.log('[Init] Username claimed:', isClaimed);
+
           if (isClaimed) {
             setMyUsername(savedUsername);
             setSetupStep('ready');
             toast.success(`Welcome back, ${savedUsername}!`);
           } else {
+            console.warn('[Init] Username not claimed on server, need to claim');
             setSetupStep('claim');
           }
         } else {
@@ -254,10 +261,50 @@ export default function App() {
   // Publish service to accept incoming connections
   const publishMyService = async () => {
     try {
+      // Verify username is claimed with correct keypair before publishing
+      console.log('[Publish] Verifying username claim...');
+      const isClaimed = await rondevu.isUsernameClaimed();
+      console.log('[Publish] Is claimed by us:', isClaimed);
+
+      if (!isClaimed) {
+        console.warn('[Publish] Username not claimed by current keypair');
+
+        // Check if username is claimed by someone else
+        try {
+          const usernameCheck = await fetch(`${API_URL}/users/${myUsername}`);
+          const checkData = await usernameCheck.json();
+
+          if (!checkData.available) {
+            // Username claimed by different keypair
+            console.error('[Publish] Username claimed by different keypair');
+            toast.error(
+              'Username keypair mismatch. Please logout and try again with a fresh account.',
+              { duration: 10000 }
+            );
+            return;
+          }
+        } catch (e) {
+          console.error('[Publish] Failed to check username:', e);
+        }
+
+        // Try to claim username
+        console.log('[Publish] Attempting to claim username...');
+        toast.loading('Claiming username...', { id: 'claim' });
+        try {
+          await rondevu.claimUsername();
+          toast.success('Username claimed!', { id: 'claim' });
+        } catch (claimErr) {
+          console.error('[Publish] Failed to claim username:', claimErr);
+          toast.error(`Failed to claim username: ${claimErr.message}`, { id: 'claim' });
+          return;
+        }
+      }
+
       // We'll create a pool of offers manually
       const offers = [];
       const poolSize = 10; // Support up to 10 simultaneous connections
 
+      console.log('[Publish] Creating', poolSize, 'peer connections...');
       for (let i = 0; i < poolSize; i++) {
         const pc = new RTCPeerConnection(getCurrentRtcConfig());
         const dc = pc.createDataChannel('chat');
@@ -280,6 +327,9 @@ export default function App() {
 
       // Publish service
       const fqn = `${CHAT_SERVICE}@${myUsername}`;
+      console.log('[Publish] Publishing service with FQN:', fqn);
+      console.log('[Publish] Public key:', rondevu.getPublicKey());
+
       await rondevu.publishService({
         serviceFqn: fqn,
         offers,
@@ -287,10 +337,19 @@ export default function App() {
       });
 
       setMyServicePublished(true);
-      console.log('✅ Chat service published with', poolSize, 'offers');
+      console.log('✅ Chat service published successfully with', poolSize, 'offers');
+      toast.success('Chat service started!');
     } catch (err) {
-      console.error('Failed to publish service:', err);
-      toast.error(`Failed to publish service: ${err.message}`);
+      console.error('[Publish] Failed to publish service:', err);
+      toast.error(`Failed to start chat service: ${err.message}`);
+
+      // Provide helpful guidance based on error type
+      if (err.message?.includes('Invalid signature') || err.message?.includes('403')) {
+        toast.error(
+          'Authentication error. Try logging out and creating a new account.',
+          { duration: 10000 }
+        );
+      }
     }
   };
 
