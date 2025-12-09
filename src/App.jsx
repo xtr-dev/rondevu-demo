@@ -1,541 +1,1413 @@
-import React, { useState, useEffect, useRef } from 'react'
-import { Rondevu } from '@xtr-dev/rondevu-client'
-import toast, { Toaster } from 'react-hot-toast'
+import React, { useState, useEffect, useRef } from 'react';
+import { Rondevu } from '@xtr-dev/rondevu-client';
+import toast, { Toaster } from 'react-hot-toast';
 
-const API_URL = 'https://api.ronde.vu'
-const CHAT_SERVICE = 'chat:2.0.0'
+const API_URL = 'https://api.ronde.vu';
+const CHAT_SERVICE = 'chat:2.0.0';
 
-const RTC_CONFIG = {
-    iceServers: [
-        { urls: ['stun:57.129.61.67:3478'] },
+// Preset RTC configurations
+const RTC_PRESETS = {
+  'ipv4-turn': {
+    name: 'IPv4 TURN (Recommended)',
+    config: {
+      iceServers: [
+        { urls: ["stun:57.129.61.67:3478"] },
         {
-            urls: [
-                'turn:57.129.61.67:3478?transport=tcp',
-                'turn:57.129.61.67:3478?transport=udp',
-            ],
-            username: 'webrtcuser',
-            credential: 'supersecretpassword',
-        },
-    ],
-}
+          urls: [
+            "turn:57.129.61.67:3478?transport=tcp",
+            "turn:57.129.61.67:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
+      ],
+    }
+  },
+  'hostname-turns': {
+    name: 'Hostname TURNS (TLS)',
+    config: {
+      iceServers: [
+        { urls: ["stun:turn.share.fish:3478"] },
+        {
+          urls: [
+            "turns:turn.share.fish:5349?transport=tcp",
+            "turns:turn.share.fish:5349?transport=udp",
+            "turn:turn.share.fish:3478?transport=tcp",
+            "turn:turn.share.fish:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
+      ],
+    }
+  },
+  'google-stun': {
+    name: 'Google STUN Only',
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    }
+  },
+  'relay-only': {
+    name: 'Force TURN Relay (Testing)',
+    config: {
+      iceServers: [
+        { urls: ["stun:57.129.61.67:3478"] },
+        {
+          urls: [
+            "turn:57.129.61.67:3478?transport=tcp",
+            "turn:57.129.61.67:3478?transport=udp",
+          ],
+          username: "webrtcuser",
+          credential: "supersecretpassword"
+        }
+      ],
+      iceTransportPolicy: 'relay'
+    }
+  },
+  'custom': {
+    name: 'Custom Configuration',
+    config: null // Will be loaded from user input
+  }
+};
 
 export default function App() {
-    // Setup state
-    const [rondevu, setRondevu] = useState(null)
-    const [myUsername, setMyUsername] = useState(null)
-    const [setupStep, setSetupStep] = useState('init') // init, claim, ready
-    const [usernameInput, setUsernameInput] = useState('')
+  const [rondevu, setRondevu] = useState(null);
+  const [myUsername, setMyUsername] = useState(null);
 
-    // Chat state
-    const [peerUsername, setPeerUsername] = useState('')
-    const [peerConnection, setPeerConnection] = useState(null)
-    const [dataChannel, setDataChannel] = useState(null)
-    const [connectionState, setConnectionState] = useState('disconnected') // disconnected, connecting, connected
-    const [messages, setMessages] = useState([])
-    const [messageInput, setMessageInput] = useState('')
-    const [role, setRole] = useState(null) // 'offerer' or 'answerer'
+  // Setup
+  const [setupStep, setSetupStep] = useState('init'); // init, claim, ready
+  const [usernameInput, setUsernameInput] = useState('');
 
-    // Signaling state
-    const [serviceFqn, setServiceFqn] = useState(null)
-    const [offerId, setOfferId] = useState(null)
-    const [answerPolling, setAnswerPolling] = useState(null)
-    const [icePolling, setIcePolling] = useState(null)
-    const lastIceTimestamp = useRef(0)
+  // Contacts
+  const [contacts, setContacts] = useState([]);
+  const [contactInput, setContactInput] = useState('');
+  const [onlineUsers, setOnlineUsers] = useState(new Set());
 
-    const messagesEndRef = useRef(null)
+  // Chat - structure: { [username]: { connection, channel, messages, status, role, serviceFqn, offerId, polling } }
+  const [activeChats, setActiveChats] = useState({});
+  const [selectedChat, setSelectedChat] = useState(null);
+  const [messageInputs, setMessageInputs] = useState({});
 
-    // Initialize Rondevu Service
-    useEffect(() => {
-        const init = async () => {
-            try {
-                const savedUsername = localStorage.getItem('rondevu-username')
-                const savedKeypair = localStorage.getItem('rondevu-keypair')
+  // Service - we publish one service that can accept multiple connections
+  const [myServicePublished, setMyServicePublished] = useState(false);
+  const [hostConnections, setHostConnections] = useState({}); // Track incoming connections as host
 
-                const parsedKeypair = savedKeypair ? JSON.parse(savedKeypair) : undefined
+  const chatEndRef = useRef(null);
 
-                const service = new Rondevu({
-                    apiUrl: API_URL,
-                    username: savedUsername || 'temp',
-                    keypair: parsedKeypair,
-                })
+  // Settings
+  const [showSettings, setShowSettings] = useState(false);
+  const [rtcPreset, setRtcPreset] = useState('ipv4-turn');
+  const [customRtcConfig, setCustomRtcConfig] = useState('');
 
-                await service.initialize()
-                setRondevu(service)
+  // Get current RTC configuration
+  const getCurrentRtcConfig = () => {
+    if (rtcPreset === 'custom') {
+      try {
+        return JSON.parse(customRtcConfig);
+      } catch (err) {
+        console.error('Invalid custom RTC config:', err);
+        return RTC_PRESETS['ipv4-turn'].config;
+      }
+    }
+    return RTC_PRESETS[rtcPreset]?.config || RTC_PRESETS['ipv4-turn'].config;
+  };
 
-                if (savedUsername && savedKeypair) {
-                    const isClaimed = await service.isUsernameClaimed()
-                    if (isClaimed) {
-                        setMyUsername(savedUsername)
-                        setSetupStep('ready')
-                        toast.success(`Welcome back, ${savedUsername}!`)
+  // Load saved settings
+  useEffect(() => {
+    const savedPreset = localStorage.getItem('rondevu-rtc-preset');
+    const savedCustomConfig = localStorage.getItem('rondevu-rtc-custom');
 
-                        // Publish service
-                        await publishService(service, savedUsername)
-                    } else {
-                        setSetupStep('claim')
-                    }
-                } else {
-                    setSetupStep('claim')
-                }
-            } catch (err) {
-                console.error('Initialization failed:', err)
-                toast.error(`Failed to initialize: ${err.message}`)
-                setSetupStep('claim')
-            }
+    if (savedPreset) {
+      setRtcPreset(savedPreset);
+    }
+    if (savedCustomConfig) {
+      setCustomRtcConfig(savedCustomConfig);
+    }
+  }, []);
+
+  // Save settings when they change
+  useEffect(() => {
+    localStorage.setItem('rondevu-rtc-preset', rtcPreset);
+  }, [rtcPreset]);
+
+  useEffect(() => {
+    if (customRtcConfig) {
+      localStorage.setItem('rondevu-rtc-custom', customRtcConfig);
+    }
+  }, [customRtcConfig]);
+
+  // Initialize Rondevu
+  useEffect(() => {
+    const init = async () => {
+      try {
+        const savedUsername = localStorage.getItem('rondevu-username');
+        const savedKeypair = localStorage.getItem('rondevu-keypair');
+        const savedContacts = localStorage.getItem('rondevu-contacts');
+
+        // Load contacts
+        if (savedContacts) {
+          try {
+            setContacts(JSON.parse(savedContacts));
+          } catch (err) {
+            console.error('Failed to load contacts:', err);
+          }
         }
 
-        init()
-    }, [])
+        const parsedKeypair = savedKeypair ? JSON.parse(savedKeypair) : undefined;
 
-    // Auto-scroll messages
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-    }, [messages])
+        const service = new Rondevu({
+          apiUrl: API_URL,
+          username: savedUsername || 'temp',
+          keypair: parsedKeypair,
+        });
 
-    // Cleanup on unmount
-    useEffect(() => {
-        return () => {
-            if (answerPolling) clearInterval(answerPolling)
-            if (icePolling) clearInterval(icePolling)
+        await service.initialize();
+        setRondevu(service);
+
+        if (savedUsername && savedKeypair) {
+          const isClaimed = await service.isUsernameClaimed();
+          if (isClaimed) {
+            setMyUsername(savedUsername);
+            setSetupStep('ready');
+            toast.success(`Welcome back, ${savedUsername}!`);
+          } else {
+            setSetupStep('claim');
+          }
+        } else {
+          setSetupStep('claim');
         }
-    }, [answerPolling, icePolling])
+      } catch (err) {
+        console.error('Initialization failed:', err);
+        toast.error(`Failed to initialize: ${err.message}`);
+        setSetupStep('claim');
+      }
+    };
 
-    // Publish chat service (offerer)
-    const publishService = async (service, username) => {
+    init();
+  }, []);
+
+  // Auto-scroll chat
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [activeChats, selectedChat]);
+
+  // Publish service when ready
+  useEffect(() => {
+    if (setupStep === 'ready' && myUsername && rondevu && !myServicePublished) {
+      publishMyService();
+    }
+  }, [setupStep, myUsername, rondevu, myServicePublished]);
+
+  // Check online status periodically
+  useEffect(() => {
+    if (setupStep !== 'ready' || !rondevu) return;
+
+    const checkOnlineStatus = async () => {
+      const online = new Set();
+      for (const contact of contacts) {
         try {
-            // Create peer connection
-            const pc = new RTCPeerConnection(RTC_CONFIG)
-            const dc = pc.createDataChannel('chat')
-
-            setupDataChannel(dc)
-            setupPeerConnection(pc)
-
-            // Create offer
-            const offer = await pc.createOffer()
-            await pc.setLocalDescription(offer)
-
-            // Publish service with FQN format: chat:2.0.0@username
-            const fqn = `${CHAT_SERVICE}@${username}`
-            const publishedService = await service.publishService({
-                serviceFqn: fqn,
-                offers: [{ sdp: offer.sdp }],
-                ttl: 300000,
-            })
-
-            const firstOffer = publishedService.offers[0]
-            setServiceFqn(fqn)
-            setOfferId(firstOffer.offerId)
-            setPeerConnection(pc)
-            setDataChannel(dc)
-            setRole('offerer')
-
-            // Poll for answer
-            startAnswerPolling(service, fqn, firstOffer.offerId, pc)
-
-            // Poll for ICE candidates
-            startIcePolling(service, fqn, firstOffer.offerId, pc)
-
-            // Send local ICE candidates
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    console.log('Sending ICE candidate')
-                    service.addOfferIceCandidates(
-                        fqn,
-                        firstOffer.offerId,
-                        [event.candidate.toJSON()]
-                    ).catch(err => console.error('Failed to send ICE candidate:', err))
-                }
-            }
-
-            toast.success('Service published! Waiting for peer...')
+          const fqn = `${CHAT_SERVICE}@${contact}`;
+          await rondevu.getService(fqn);
+          online.add(contact);
         } catch (err) {
-            console.error('Failed to publish service:', err)
-            toast.error(`Failed to publish service: ${err.message}`)
+          // User offline or doesn't have service published
         }
-    }
+      }
+      setOnlineUsers(online);
+    };
 
-    // Poll for answer from answerer (offerer side)
-    const startAnswerPolling = (service, fqn, offerId, pc) => {
-        const interval = setInterval(async () => {
-            try {
-                const answer = await service.getOfferAnswer(fqn, offerId)
-                if (answer && answer.sdp) {
-                    console.log('Received answer')
-                    clearInterval(interval)
-                    setAnswerPolling(null)
-                    await pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
-                    toast.success('Peer connected!')
-                }
-            } catch (err) {
-                // 404 is expected when answer isn't available yet
-                if (!err.message?.includes('404')) {
-                    console.error('Error polling for answer:', err)
-                }
+    checkOnlineStatus();
+    const interval = setInterval(checkOnlineStatus, 10000); // Check every 10s
+
+    return () => clearInterval(interval);
+  }, [contacts, setupStep, rondevu]);
+
+  // Claim username
+  const handleClaimUsername = async () => {
+    if (!rondevu || !usernameInput) return;
+
+    try {
+      const keypair = rondevu.getKeypair();
+      const newService = new Rondevu({
+        apiUrl: API_URL,
+        username: usernameInput,
+        keypair,
+      });
+      await newService.initialize();
+      await newService.claimUsername();
+
+      setRondevu(newService);
+      setMyUsername(usernameInput);
+      localStorage.setItem('rondevu-username', usernameInput);
+      localStorage.setItem('rondevu-keypair', JSON.stringify(keypair));
+
+      setSetupStep('ready');
+      toast.success(`Welcome, ${usernameInput}!`);
+    } catch (err) {
+      toast.error(`Error: ${err.message}`);
+    }
+  };
+
+  // Publish service to accept incoming connections
+  const publishMyService = async () => {
+    try {
+      // We'll create a pool of offers manually
+      const offers = [];
+      const poolSize = 10; // Support up to 10 simultaneous connections
+
+      for (let i = 0; i < poolSize; i++) {
+        const pc = new RTCPeerConnection(getCurrentRtcConfig());
+        const dc = pc.createDataChannel('chat');
+
+        // Setup handlers
+        setupHostConnection(pc, dc, myUsername);
+
+        // Create offer
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+
+        offers.push({ sdp: offer.sdp });
+
+        // Store connection for later
+        setHostConnections(prev => ({
+          ...prev,
+          [`host-${i}`]: { pc, dc, status: 'waiting' }
+        }));
+      }
+
+      // Publish service
+      const fqn = `${CHAT_SERVICE}@${myUsername}`;
+      await rondevu.publishService({
+        serviceFqn: fqn,
+        offers,
+        ttl: 300000, // 5 minutes
+      });
+
+      setMyServicePublished(true);
+      console.log('✅ Chat service published with', poolSize, 'offers');
+    } catch (err) {
+      console.error('Failed to publish service:', err);
+      toast.error(`Failed to publish service: ${err.message}`);
+    }
+  };
+
+  // Setup host connection (when someone connects to us)
+  const setupHostConnection = (pc, dc, hostUsername) => {
+    let peerUsername = null;
+
+    dc.onopen = () => {
+      console.log('Host data channel opened');
+    };
+
+    dc.onclose = () => {
+      console.log('Host data channel closed');
+      if (peerUsername) {
+        setActiveChats(prev => ({
+          ...prev,
+          [peerUsername]: { ...prev[peerUsername], status: 'disconnected' }
+        }));
+      }
+    };
+
+    dc.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'identify') {
+          // Peer identified themselves
+          peerUsername = msg.from;
+          console.log(`📡 New chat connection from: ${peerUsername}`);
+
+          setActiveChats(prev => ({
+            ...prev,
+            [peerUsername]: {
+              username: peerUsername,
+              channel: dc,
+              connection: pc,
+              messages: prev[peerUsername]?.messages || [],
+              status: 'connected',
+              role: 'host'
             }
-        }, 1000)
+          }));
 
-        setAnswerPolling(interval)
-    }
-
-    // Poll for ICE candidates (both offerer and answerer)
-    const startIcePolling = (service, fqn, offerId, pc, targetRole) => {
-        const interval = setInterval(async () => {
-            try {
-                const result = await service.getOfferIceCandidates(
-                    fqn,
-                    offerId,
-                    lastIceTimestamp.current
-                )
-
-                for (const item of result.candidates) {
-                    if (item.candidate && item.candidate.candidate) {
-                        try {
-                            const rtcCandidate = new RTCIceCandidate(item.candidate)
-                            console.log('Received ICE candidate')
-                            await pc.addIceCandidate(rtcCandidate)
-                            lastIceTimestamp.current = item.createdAt
-                        } catch (err) {
-                            console.warn('Failed to process ICE candidate:', err)
-                            lastIceTimestamp.current = item.createdAt
-                        }
-                    } else {
-                        lastIceTimestamp.current = item.createdAt
-                    }
-                }
-            } catch (err) {
-                // 404/410 means offer expired
-                if (err.message?.includes('404') || err.message?.includes('410')) {
-                    console.warn('Offer expired, stopping ICE polling')
-                    clearInterval(interval)
-                    setIcePolling(null)
-                } else if (!err.message?.includes('404')) {
-                    console.error('Error polling for ICE candidates:', err)
-                }
+          // Send acknowledgment
+          dc.send(JSON.stringify({
+            type: 'identify_ack',
+            from: hostUsername
+          }));
+        } else if (msg.type === 'message' && peerUsername) {
+          // Chat message
+          setActiveChats(prev => ({
+            ...prev,
+            [peerUsername]: {
+              ...prev[peerUsername],
+              messages: [...(prev[peerUsername]?.messages || []), {
+                from: peerUsername,
+                text: msg.text,
+                timestamp: Date.now()
+              }]
             }
-        }, 1000)
+          }));
+        }
+      } catch (err) {
+        console.error('Failed to parse message:', err);
+      }
+    };
 
-        setIcePolling(interval)
+    pc.onconnectionstatechange = () => {
+      console.log('Host connection state:', pc.connectionState);
+    };
+  };
+
+  // Add contact
+  const handleAddContact = () => {
+    if (!contactInput || contacts.includes(contactInput)) {
+      toast.error('Invalid or duplicate contact');
+      return;
+    }
+    if (contactInput === myUsername) {
+      toast.error("You can't add yourself!");
+      return;
     }
 
-    // Claim username
-    const handleClaimUsername = async () => {
-        if (!rondevu || !usernameInput) return
+    const newContacts = [...contacts, contactInput];
+    setContacts(newContacts);
+    localStorage.setItem('rondevu-contacts', JSON.stringify(newContacts));
+    setContactInput('');
+    toast.success(`Added ${contactInput}`);
+  };
 
+  // Remove contact
+  const handleRemoveContact = (contact) => {
+    const newContacts = contacts.filter(c => c !== contact);
+    setContacts(newContacts);
+    localStorage.setItem('rondevu-contacts', JSON.stringify(newContacts));
+    if (selectedChat === contact) {
+      setSelectedChat(null);
+    }
+    toast.success(`Removed ${contact}`);
+  };
+
+  // Start chat with contact (answerer role)
+  const handleStartChat = async (contact) => {
+    if (!rondevu || activeChats[contact]?.status === 'connected') {
+      setSelectedChat(contact);
+      return;
+    }
+
+    try {
+      toast.loading(`Connecting to ${contact}...`, { id: 'connecting' });
+
+      // Discover peer's service
+      const fqn = `${CHAT_SERVICE}@${contact}`;
+      const serviceData = await rondevu.getService(fqn);
+
+      console.log('Found peer service:', serviceData);
+
+      // Create peer connection
+      const pc = new RTCPeerConnection(getCurrentRtcConfig());
+
+      // Handle incoming data channel
+      let dataChannel = null;
+      pc.ondatachannel = (event) => {
+        console.log('Received data channel from', contact);
+        dataChannel = event.channel;
+        setupClientChannel(dataChannel, contact, pc);
+      };
+
+      // Set remote offer
+      await pc.setRemoteDescription({
+        type: 'offer',
+        sdp: serviceData.sdp,
+      });
+
+      // Create answer
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // Send answer
+      await rondevu.postOfferAnswer(fqn, serviceData.offerId, answer.sdp);
+
+      // Poll for ICE candidates
+      const lastIceTimestamp = { current: 0 };
+      const icePolling = setInterval(async () => {
         try {
-            const keypair = rondevu.getKeypair()
-            const newService = new Rondevu({
-                apiUrl: API_URL,
-                username: usernameInput,
-                keypair,
-            })
-            await newService.initialize()
-            await newService.claimUsername()
+          const result = await rondevu.getOfferIceCandidates(
+            fqn,
+            serviceData.offerId,
+            lastIceTimestamp.current
+          );
 
-            setRondevu(newService)
-            setMyUsername(usernameInput)
-            localStorage.setItem('rondevu-username', usernameInput)
-            localStorage.setItem('rondevu-keypair', JSON.stringify(keypair))
-
-            setSetupStep('ready')
-            toast.success(`Welcome, ${usernameInput}!`)
-
-            // Publish service
-            await publishService(newService, usernameInput)
-        } catch (err) {
-            toast.error(`Error: ${err.message}`)
-        }
-    }
-
-    // Connect to peer (answerer)
-    const handleConnectToPeer = async () => {
-        if (!rondevu || !peerUsername) return
-
-        try {
-            setConnectionState('connecting')
-            toast.loading('Connecting to peer...')
-
-            // Discover peer's service
-            const fqn = `${CHAT_SERVICE}@${peerUsername}`
-            const serviceData = await rondevu.getService(fqn)
-
-            console.log('Found peer service:', serviceData)
-            setServiceFqn(fqn)
-            setOfferId(serviceData.offerId)
-
-            // Create peer connection
-            const pc = new RTCPeerConnection(RTC_CONFIG)
-            setupPeerConnection(pc)
-
-            // Handle incoming data channel
-            pc.ondatachannel = (event) => {
-                console.log('Received data channel')
-                setupDataChannel(event.channel)
-                setDataChannel(event.channel)
+          for (const item of result.candidates) {
+            if (item.candidate && item.candidate.candidate) {
+              try {
+                const rtcCandidate = new RTCIceCandidate(item.candidate);
+                await pc.addIceCandidate(rtcCandidate);
+                lastIceTimestamp.current = item.createdAt;
+              } catch (err) {
+                console.warn('Failed to process ICE candidate:', err);
+                lastIceTimestamp.current = item.createdAt;
+              }
+            } else {
+              lastIceTimestamp.current = item.createdAt;
             }
-
-            // Set remote offer
-            await pc.setRemoteDescription({
-                type: 'offer',
-                sdp: serviceData.sdp,
-            })
-
-            // Create answer
-            const answer = await pc.createAnswer()
-            await pc.setLocalDescription(answer)
-
-            // Send answer
-            await rondevu.postOfferAnswer(fqn, serviceData.offerId, answer.sdp)
-
-            // Poll for ICE candidates
-            startIcePolling(rondevu, fqn, serviceData.offerId, pc, 'answerer')
-
-            // Send local ICE candidates
-            pc.onicecandidate = (event) => {
-                if (event.candidate) {
-                    console.log('Sending ICE candidate')
-                    rondevu.addOfferIceCandidates(
-                        fqn,
-                        serviceData.offerId,
-                        [event.candidate.toJSON()]
-                    ).catch(err => console.error('Failed to send ICE candidate:', err))
-                }
-            }
-
-            setPeerConnection(pc)
-            setRole('answerer')
-
-            toast.dismiss()
-            toast.success('Answer sent! Waiting for connection...')
+          }
         } catch (err) {
-            console.error('Failed to connect:', err)
-            toast.dismiss()
-            toast.error(`Failed to connect: ${err.message}`)
-            setConnectionState('disconnected')
+          if (err.message?.includes('404') || err.message?.includes('410')) {
+            console.warn('Offer expired, stopping ICE polling');
+            clearInterval(icePolling);
+          }
         }
+      }, 1000);
+
+      // Send local ICE candidates
+      pc.onicecandidate = (event) => {
+        if (event.candidate) {
+          rondevu.addOfferIceCandidates(
+            fqn,
+            serviceData.offerId,
+            [event.candidate.toJSON()]
+          ).catch(err => console.error('Failed to send ICE candidate:', err));
+        }
+      };
+
+      pc.onconnectionstatechange = () => {
+        console.log('Client connection state:', pc.connectionState);
+        if (pc.connectionState === 'connected') {
+          toast.success(`Connected to ${contact}`, { id: 'connecting' });
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+          toast.error(`Disconnected from ${contact}`);
+          clearInterval(icePolling);
+          setActiveChats(prev => ({
+            ...prev,
+            [contact]: { ...prev[contact], status: 'disconnected' }
+          }));
+        }
+      };
+
+      // Store connection info
+      setActiveChats(prev => ({
+        ...prev,
+        [contact]: {
+          username: contact,
+          connection: pc,
+          channel: dataChannel, // Will be set when ondatachannel fires
+          messages: prev[contact]?.messages || [],
+          status: 'connecting',
+          role: 'answerer',
+          serviceFqn: fqn,
+          offerId: serviceData.offerId,
+          icePolling
+        }
+      }));
+
+      setSelectedChat(contact);
+
+    } catch (err) {
+      console.error('Failed to connect:', err);
+      toast.error(`Failed to connect to ${contact}`, { id: 'connecting' });
     }
+  };
 
-    // Setup peer connection event handlers
-    const setupPeerConnection = (pc) => {
-        pc.onconnectionstatechange = () => {
-            console.log('Connection state:', pc.connectionState)
-            setConnectionState(pc.connectionState)
+  // Setup client data channel
+  const setupClientChannel = (dc, contact, pc) => {
+    dc.onopen = () => {
+      console.log('Client data channel opened with', contact);
 
-            if (pc.connectionState === 'connected') {
-                toast.success('Connected!')
-            } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
-                toast.error('Connection failed or disconnected')
+      // Send identification
+      dc.send(JSON.stringify({
+        type: 'identify',
+        from: myUsername
+      }));
+    };
+
+    dc.onclose = () => {
+      console.log('Client data channel closed');
+      setActiveChats(prev => ({
+        ...prev,
+        [contact]: { ...prev[contact], status: 'disconnected' }
+      }));
+    };
+
+    dc.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+
+        if (msg.type === 'identify_ack') {
+          // Connection acknowledged
+          setActiveChats(prev => ({
+            ...prev,
+            [contact]: {
+              ...prev[contact],
+              channel: dc,
+              status: 'connected'
             }
+          }));
+          toast.success(`Connected to ${contact}`, { id: 'connecting' });
+        } else if (msg.type === 'message') {
+          // Chat message
+          setActiveChats(prev => ({
+            ...prev,
+            [contact]: {
+              ...prev[contact],
+              messages: [...(prev[contact]?.messages || []), {
+                from: contact,
+                text: msg.text,
+                timestamp: Date.now()
+              }]
+            }
+          }));
         }
+      } catch (err) {
+        console.error('Failed to parse message:', err);
+      }
+    };
 
-        pc.oniceconnectionstatechange = () => {
-            console.log('ICE connection state:', pc.iceConnectionState)
-        }
+    // Update the channel reference in state
+    setActiveChats(prev => ({
+      ...prev,
+      [contact]: {
+        ...prev[contact],
+        channel: dc
+      }
+    }));
+  };
 
-        pc.onicegatheringstatechange = () => {
-            console.log('ICE gathering state:', pc.iceGatheringState)
-        }
+  // Send message
+  const handleSendMessage = (contact) => {
+    const text = messageInputs[contact];
+    if (!text || !activeChats[contact]?.channel) return;
+
+    const chat = activeChats[contact];
+    if (chat.status !== 'connected') {
+      toast.error('Not connected');
+      return;
     }
 
-    // Setup data channel event handlers
-    const setupDataChannel = (dc) => {
-        dc.onopen = () => {
-            console.log('Data channel opened')
-            setConnectionState('connected')
-        }
+    try {
+      chat.channel.send(JSON.stringify({
+        type: 'message',
+        text
+      }));
 
-        dc.onclose = () => {
-            console.log('Data channel closed')
-            setConnectionState('disconnected')
+      setActiveChats(prev => ({
+        ...prev,
+        [contact]: {
+          ...prev[contact],
+          messages: [...prev[contact].messages, {
+            from: myUsername,
+            text,
+            timestamp: Date.now()
+          }]
         }
+      }));
 
-        dc.onmessage = (event) => {
-            console.log('Received message:', event.data)
-            setMessages(prev => [...prev, { from: 'peer', text: event.data, timestamp: Date.now() }])
-        }
-
-        dc.onerror = (err) => {
-            console.error('Data channel error:', err)
-        }
+      setMessageInputs(prev => ({ ...prev, [contact]: '' }));
+    } catch (err) {
+      console.error('Failed to send message:', err);
+      toast.error('Failed to send message');
     }
+  };
 
-    // Send message
-    const handleSendMessage = () => {
-        if (!dataChannel || !messageInput.trim()) return
-
-        if (dataChannel.readyState !== 'open') {
-            toast.error('Data channel not open')
-            return
-        }
-
-        try {
-            dataChannel.send(messageInput)
-            setMessages(prev => [...prev, { from: 'me', text: messageInput, timestamp: Date.now() }])
-            setMessageInput('')
-        } catch (err) {
-            console.error('Failed to send message:', err)
-            toast.error('Failed to send message')
-        }
+  // Clear all data
+  const handleLogout = () => {
+    if (window.confirm('Are you sure you want to logout? This will clear all data.')) {
+      localStorage.clear();
+      window.location.reload();
     }
+  };
 
-    // Cleanup
-    const handleDisconnect = () => {
-        if (peerConnection) {
-            peerConnection.close()
-        }
-        if (dataChannel) {
-            dataChannel.close()
-        }
-        if (answerPolling) {
-            clearInterval(answerPolling)
-            setAnswerPolling(null)
-        }
-        if (icePolling) {
-            clearInterval(icePolling)
-            setIcePolling(null)
-        }
-        setPeerConnection(null)
-        setDataChannel(null)
-        setConnectionState('disconnected')
-        setMessages([])
-        setPeerUsername('')
-        setRole(null)
-        setServiceFqn(null)
-        setOfferId(null)
-        lastIceTimestamp.current = 0
-        toast.success('Disconnected')
-    }
+  if (!rondevu) {
+    return <div style={styles.loading}>Loading...</div>;
+  }
 
-    // Render
-    return (
-        <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-8">
-            <Toaster position="top-right" />
+  return (
+    <div style={styles.container}>
+      <Toaster position="top-right" />
 
-            <div className="max-w-4xl mx-auto">
-                <h1 className="text-4xl font-bold text-center mb-8 text-indigo-900">
-                    Rondevu Chat Demo
-                </h1>
+      {/* Settings Modal */}
+      {showSettings && (
+        <div style={styles.modalOverlay} onClick={() => setShowSettings(false)}>
+          <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+            <h2 style={styles.modalTitle}>WebRTC Configuration</h2>
 
-                {setupStep === 'claim' && (
-                    <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-                        <h2 className="text-2xl font-semibold mb-4">Claim Username</h2>
-                        <div className="flex gap-4">
-                            <input
-                                type="text"
-                                value={usernameInput}
-                                onChange={(e) => setUsernameInput(e.target.value)}
-                                placeholder="Enter username"
-                                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                onKeyPress={(e) => e.key === 'Enter' && handleClaimUsername()}
-                            />
-                            <button
-                                onClick={handleClaimUsername}
-                                className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                            >
-                                Claim
-                            </button>
-                        </div>
-                    </div>
-                )}
-
-                {setupStep === 'ready' && (
-                    <>
-                        <div className="bg-white rounded-lg shadow-lg p-8 mb-8">
-                            <h2 className="text-2xl font-semibold mb-4">
-                                Logged in as: <span className="text-indigo-600">{myUsername}</span>
-                            </h2>
-                            <p className="text-gray-600 mb-4">
-                                Role: <span className="font-semibold">
-                                    {role === 'offerer' ? 'Offerer (Hosting)' : role === 'answerer' ? 'Answerer' : 'Waiting'}
-                                </span>
-                            </p>
-
-                            {connectionState === 'disconnected' && !role && (
-                                <div className="flex gap-4">
-                                    <input
-                                        type="text"
-                                        value={peerUsername}
-                                        onChange={(e) => setPeerUsername(e.target.value)}
-                                        placeholder="Enter peer username to connect"
-                                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                        onKeyPress={(e) => e.key === 'Enter' && handleConnectToPeer()}
-                                    />
-                                    <button
-                                        onClick={handleConnectToPeer}
-                                        className="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-                                    >
-                                        Connect
-                                    </button>
-                                </div>
-                            )}
-
-                            {connectionState === 'connecting' && (
-                                <div className="text-center py-4">
-                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600 mx-auto"></div>
-                                    <p className="mt-2 text-gray-600">Connecting...</p>
-                                </div>
-                            )}
-
-                            {(connectionState === 'connected' || role) && connectionState !== 'connecting' && (
-                                <button
-                                    onClick={handleDisconnect}
-                                    className="px-6 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
-                                >
-                                    Disconnect
-                                </button>
-                            )}
-                        </div>
-
-                        {connectionState === 'connected' && (
-                            <div className="bg-white rounded-lg shadow-lg p-8">
-                                <h2 className="text-2xl font-semibold mb-4">Chat</h2>
-
-                                <div className="h-96 overflow-y-auto mb-4 p-4 bg-gray-50 rounded-lg">
-                                    {messages.length === 0 && (
-                                        <p className="text-gray-400 text-center">No messages yet. Start chatting!</p>
-                                    )}
-                                    {messages.map((msg, i) => (
-                                        <div
-                                            key={i}
-                                            className={`mb-3 ${msg.from === 'me' ? 'text-right' : 'text-left'}`}
-                                        >
-                                            <div
-                                                className={`inline-block px-4 py-2 rounded-lg max-w-xs ${
-                                                    msg.from === 'me'
-                                                        ? 'bg-indigo-600 text-white'
-                                                        : 'bg-gray-300 text-gray-900'
-                                                }`}
-                                            >
-                                                {msg.text}
-                                            </div>
-                                            <div className="text-xs text-gray-400 mt-1">
-                                                {new Date(msg.timestamp).toLocaleTimeString()}
-                                            </div>
-                                        </div>
-                                    ))}
-                                    <div ref={messagesEndRef} />
-                                </div>
-
-                                <div className="flex gap-4">
-                                    <input
-                                        type="text"
-                                        value={messageInput}
-                                        onChange={(e) => setMessageInput(e.target.value)}
-                                        placeholder="Type a message..."
-                                        className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                                        onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-                                    />
-                                    <button
-                                        onClick={handleSendMessage}
-                                        className="px-6 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors"
-                                    >
-                                        Send
-                                    </button>
-                                </div>
-                            </div>
-                        )}
-                    </>
-                )}
+            <div style={styles.settingsSection}>
+              <label style={styles.settingsLabel}>
+                Preset Configuration:
+              </label>
+              <select
+                value={rtcPreset}
+                onChange={(e) => setRtcPreset(e.target.value)}
+                style={styles.settingsSelect}
+              >
+                {Object.entries(RTC_PRESETS).map(([key, preset]) => (
+                  <option key={key} value={key}>
+                    {preset.name}
+                  </option>
+                ))}
+              </select>
             </div>
+
+            {rtcPreset === 'custom' && (
+              <div style={styles.settingsSection}>
+                <label style={styles.settingsLabel}>
+                  Custom RTC Configuration (JSON):
+                </label>
+                <textarea
+                  value={customRtcConfig}
+                  onChange={(e) => setCustomRtcConfig(e.target.value)}
+                  placeholder={JSON.stringify(RTC_PRESETS['ipv4-turn'].config, null, 2)}
+                  style={styles.settingsTextarea}
+                  rows={15}
+                />
+                <p style={styles.settingsHint}>
+                  Enter valid RTCConfiguration JSON
+                </p>
+              </div>
+            )}
+
+            {rtcPreset !== 'custom' && (
+              <div style={styles.settingsSection}>
+                <label style={styles.settingsLabel}>
+                  Current Configuration:
+                </label>
+                <pre style={styles.settingsPreview}>
+                  {JSON.stringify(getCurrentRtcConfig(), null, 2)}
+                </pre>
+              </div>
+            )}
+
+            <div style={styles.modalActions}>
+              <button onClick={() => setShowSettings(false)} style={styles.modalBtn}>
+                Close
+              </button>
+            </div>
+          </div>
         </div>
-    )
+      )}
+
+      {/* Setup Screen */}
+      {setupStep !== 'ready' && (
+        <div style={styles.setupScreen}>
+          <div style={styles.setupBox}>
+            <h1 style={styles.setupTitle}>Rondevu Chat</h1>
+            <p style={styles.setupSubtitle}>Decentralized P2P Chat</p>
+
+            {setupStep === 'init' && (
+              <div>
+                <p style={styles.setupDesc}>Initializing...</p>
+              </div>
+            )}
+
+            {setupStep === 'claim' && (
+              <div>
+                <p style={styles.setupDesc}>Choose your unique username</p>
+                <input
+                  type="text"
+                  placeholder="Enter username"
+                  value={usernameInput}
+                  onChange={(e) => setUsernameInput(e.target.value.toLowerCase())}
+                  onKeyPress={(e) => e.key === 'Enter' && handleClaimUsername()}
+                  style={styles.setupInput}
+                  autoFocus
+                />
+                <button
+                  onClick={handleClaimUsername}
+                  disabled={!usernameInput}
+                  style={styles.setupButton}
+                >
+                  Claim Username
+                </button>
+                <p style={styles.setupHint}>
+                  3-32 characters, lowercase letters, numbers, and dashes only
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Main Chat Screen */}
+      {setupStep === 'ready' && (
+        <div style={styles.mainScreen}>
+          {/* Sidebar */}
+          <div style={styles.sidebar}>
+            {/* User Header */}
+            <div style={styles.userHeader}>
+              <div>
+                <div style={styles.userHeaderName}>@{myUsername}</div>
+                <div style={styles.userHeaderStatus}>
+                  <span style={styles.onlineDot}></span> Online
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={() => setShowSettings(true)} style={styles.settingsBtn} title="Settings">
+                  ⚙️
+                </button>
+                <button onClick={handleLogout} style={styles.logoutBtn} title="Logout">
+                  Logout
+                </button>
+              </div>
+            </div>
+
+            {/* Add Contact */}
+            <div style={styles.addContactBox}>
+              <input
+                type="text"
+                placeholder="Add friend by username..."
+                value={contactInput}
+                onChange={(e) => setContactInput(e.target.value.toLowerCase())}
+                onKeyPress={(e) => e.key === 'Enter' && handleAddContact()}
+                style={styles.contactInput}
+              />
+              <button onClick={handleAddContact} style={styles.addBtn} title="Add friend">
+                Add
+              </button>
+            </div>
+
+            {/* Contacts List */}
+            <div style={styles.contactsList}>
+              <div style={styles.contactsHeader}>
+                Friends ({contacts.length})
+              </div>
+              {contacts.length === 0 ? (
+                <div style={styles.emptyState}>
+                  <p>No friends yet</p>
+                  <p style={{ fontSize: '12px', color: '#999' }}>
+                    Add friends by their username above
+                  </p>
+                </div>
+              ) : (
+                contacts.map(contact => {
+                  const isOnline = onlineUsers.has(contact);
+                  const hasActiveChat = activeChats[contact]?.status === 'connected';
+
+                  return (
+                    <div
+                      key={contact}
+                      className="contact-item"
+                      style={{
+                        ...styles.contactItem,
+                        ...(selectedChat === contact ? styles.contactItemActive : {})
+                      }}
+                      onClick={() => hasActiveChat ? setSelectedChat(contact) : handleStartChat(contact)}
+                    >
+                      <div style={styles.contactAvatar}>
+                        {contact[0].toUpperCase()}
+                        <span style={{
+                          ...styles.contactDot,
+                          background: isOnline ? '#4caf50' : '#999'
+                        }}></span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={styles.contactName}>{contact}</div>
+                        <div style={styles.contactStatus}>
+                          {hasActiveChat ? 'Chatting' : isOnline ? 'Online' : 'Offline'}
+                        </div>
+                      </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemoveContact(contact);
+                        }}
+                        style={styles.removeBtn}
+                        title="Remove friend"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+
+          {/* Chat Area */}
+          <div style={styles.chatArea}>
+            {!selectedChat ? (
+              <div style={styles.emptyChat}>
+                <h2 style={{ margin: 0 }}>Select a friend to chat</h2>
+                <p style={{ marginTop: '10px' }}>
+                  Click on a friend from the sidebar to start chatting
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* Chat Header */}
+                <div style={styles.chatHeader}>
+                  <div style={styles.chatHeaderAvatar}>
+                    {selectedChat[0].toUpperCase()}
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <div style={styles.chatHeaderName}>@{selectedChat}</div>
+                    <div style={styles.chatHeaderStatus}>
+                      {activeChats[selectedChat]?.status === 'connected' ? (
+                        <><span style={styles.onlineDot}></span> Connected</>
+                      ) : (
+                        'Connecting...'
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setSelectedChat(null)}
+                    style={styles.closeChatBtn}
+                    title="Close chat"
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {/* Messages */}
+                <div style={styles.messagesArea}>
+                  {(!activeChats[selectedChat] || activeChats[selectedChat].messages.length === 0) ? (
+                    <div style={styles.emptyMessages}>
+                      <p>No messages yet</p>
+                      <p style={{ fontSize: '12px', color: '#999' }}>
+                        Send a message to start the conversation
+                      </p>
+                    </div>
+                  ) : (
+                    activeChats[selectedChat].messages.map((msg, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          ...styles.message,
+                          ...(msg.from === myUsername ? styles.messageMe : styles.messageThem)
+                        }}
+                      >
+                        <div style={{
+                          ...styles.messageText,
+                          background: msg.from === myUsername ? '#4a9eff' : '#2a2a2a',
+                          color: 'white'
+                        }}>
+                          {msg.text}
+                        </div>
+                        <div style={styles.messageTime}>
+                          {new Date(msg.timestamp).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit'
+                          })}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                  <div ref={chatEndRef} />
+                </div>
+
+                {/* Input */}
+                <div style={styles.inputArea}>
+                  <input
+                    type="text"
+                    placeholder="Type a message..."
+                    value={messageInputs[selectedChat] || ''}
+                    onChange={(e) => setMessageInputs(prev => ({
+                      ...prev,
+                      [selectedChat]: e.target.value
+                    }))}
+                    onKeyPress={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendMessage(selectedChat);
+                      }
+                    }}
+                    disabled={activeChats[selectedChat]?.status !== 'connected'}
+                    style={styles.messageInput}
+                    autoFocus
+                  />
+                  <button
+                    onClick={() => handleSendMessage(selectedChat)}
+                    disabled={!messageInputs[selectedChat] || activeChats[selectedChat]?.status !== 'connected'}
+                    style={styles.sendBtn}
+                    title="Send message"
+                  >
+                    Send
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const styles = {
+  container: {
+    height: '100vh',
+    background: '#1a1a1a',
+    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+  },
+  loading: {
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#e0e0e0',
+    fontSize: '24px'
+  },
+  setupScreen: {
+    height: '100vh',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: '20px'
+  },
+  setupBox: {
+    background: '#2a2a2a',
+    borderRadius: '16px',
+    padding: '40px',
+    maxWidth: '400px',
+    width: '100%',
+    boxShadow: '0 20px 60px rgba(0,0,0,0.5)',
+    textAlign: 'center',
+    border: '1px solid #3a3a3a'
+  },
+  setupTitle: {
+    fontSize: '2.5em',
+    margin: '0 0 10px 0',
+    color: '#e0e0e0'
+  },
+  setupSubtitle: {
+    fontSize: '1.1em',
+    color: '#a0a0a0',
+    margin: '0 0 30px 0'
+  },
+  setupDesc: {
+    color: '#a0a0a0',
+    marginBottom: '20px'
+  },
+  setupInput: {
+    width: '100%',
+    padding: '15px',
+    fontSize: '16px',
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    borderRadius: '8px',
+    marginBottom: '15px',
+    boxSizing: 'border-box',
+    outline: 'none',
+  },
+  setupButton: {
+    width: '100%',
+    padding: '15px',
+    fontSize: '16px',
+    fontWeight: '600',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    borderRadius: '8px',
+    cursor: 'pointer',
+  },
+  setupHint: {
+    fontSize: '12px',
+    color: '#808080',
+    marginTop: '10px'
+  },
+  mainScreen: {
+    height: '100vh',
+    display: 'flex'
+  },
+  sidebar: {
+    width: '320px',
+    background: '#2a2a2a',
+    borderRight: '1px solid #3a3a3a',
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  userHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  userHeaderName: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  userHeaderStatus: {
+    fontSize: '12px',
+    color: '#a0a0a0',
+    marginTop: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px'
+  },
+  onlineDot: {
+    width: '8px',
+    height: '8px',
+    borderRadius: '50%',
+    background: '#4caf50',
+    display: 'inline-block'
+  },
+  settingsBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    color: '#e0e0e0',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '18px',
+    lineHeight: '1'
+  },
+  logoutBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    color: '#e0e0e0',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px'
+  },
+  addContactBox: {
+    padding: '15px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    gap: '8px'
+  },
+  contactInput: {
+    flex: 1,
+    padding: '10px',
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    borderRadius: '6px',
+    fontSize: '14px',
+    outline: 'none'
+  },
+  addBtn: {
+    padding: '10px 15px',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px'
+  },
+  contactsList: {
+    flex: 1,
+    overflowY: 'auto'
+  },
+  contactsHeader: {
+    padding: '15px 20px',
+    fontSize: '12px',
+    fontWeight: '600',
+    color: '#808080',
+    textTransform: 'uppercase',
+    letterSpacing: '0.5px'
+  },
+  emptyState: {
+    padding: '40px 20px',
+    textAlign: 'center',
+    color: '#808080'
+  },
+  contactItem: {
+    padding: '15px 20px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '12px',
+    cursor: 'pointer',
+    transition: 'background 0.2s',
+    borderBottom: '1px solid #3a3a3a'
+  },
+  contactItemActive: {
+    background: '#3a3a3a'
+  },
+  contactAvatar: {
+    width: '40px',
+    height: '40px',
+    borderRadius: '50%',
+    background: '#4a9eff',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '18px',
+    fontWeight: '600',
+    position: 'relative'
+  },
+  contactDot: {
+    position: 'absolute',
+    bottom: '0',
+    right: '0',
+    width: '12px',
+    height: '12px',
+    borderRadius: '50%',
+    border: '2px solid #2a2a2a'
+  },
+  contactName: {
+    fontSize: '15px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  contactStatus: {
+    fontSize: '12px',
+    color: '#a0a0a0',
+    marginTop: '2px'
+  },
+  removeBtn: {
+    padding: '4px 8px',
+    background: 'transparent',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '16px',
+    color: '#808080',
+    opacity: 0.6,
+  },
+  chatArea: {
+    flex: 1,
+    background: '#1a1a1a',
+    display: 'flex',
+    flexDirection: 'column'
+  },
+  emptyChat: {
+    flex: 1,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#808080'
+  },
+  chatHeader: {
+    padding: '20px',
+    borderBottom: '1px solid #3a3a3a',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '15px',
+    background: '#2a2a2a'
+  },
+  chatHeaderAvatar: {
+    width: '48px',
+    height: '48px',
+    borderRadius: '50%',
+    background: '#4a9eff',
+    color: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '20px',
+    fontWeight: '600'
+  },
+  chatHeaderName: {
+    fontSize: '18px',
+    fontWeight: '600',
+    color: '#e0e0e0'
+  },
+  chatHeaderStatus: {
+    fontSize: '13px',
+    color: '#a0a0a0',
+    marginTop: '4px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '5px'
+  },
+  closeChatBtn: {
+    padding: '8px 12px',
+    background: '#3a3a3a',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    color: '#e0e0e0'
+  },
+  messagesArea: {
+    flex: 1,
+    overflowY: 'auto',
+    padding: '20px',
+    background: '#1a1a1a'
+  },
+  emptyMessages: {
+    height: '100%',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#808080'
+  },
+  message: {
+    marginBottom: '12px',
+    display: 'flex',
+    flexDirection: 'column',
+    maxWidth: '70%'
+  },
+  messageMe: {
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end'
+  },
+  messageThem: {
+    alignSelf: 'flex-start',
+    alignItems: 'flex-start'
+  },
+  messageText: {
+    padding: '12px 16px',
+    borderRadius: '16px',
+    fontSize: '15px',
+    lineHeight: '1.4',
+    wordWrap: 'break-word',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.2)'
+  },
+  messageTime: {
+    fontSize: '11px',
+    color: '#808080',
+    marginTop: '4px',
+    padding: '0 8px'
+  },
+  inputArea: {
+    padding: '20px',
+    borderTop: '1px solid #3a3a3a',
+    display: 'flex',
+    gap: '12px',
+    background: '#2a2a2a'
+  },
+  messageInput: {
+    flex: 1,
+    padding: '12px 16px',
+    border: '1px solid #3a3a3a',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    borderRadius: '24px',
+    fontSize: '15px',
+    outline: 'none',
+  },
+  sendBtn: {
+    padding: '12px 24px',
+    borderRadius: '24px',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    cursor: 'pointer',
+    fontSize: '15px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    background: 'rgba(0, 0, 0, 0.8)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 1000
+  },
+  modalContent: {
+    background: '#2a2a2a',
+    borderRadius: '12px',
+    padding: '24px',
+    maxWidth: '600px',
+    width: '90%',
+    maxHeight: '80vh',
+    overflowY: 'auto',
+    boxShadow: '0 4px 20px rgba(0, 0, 0, 0.5)'
+  },
+  modalTitle: {
+    fontSize: '24px',
+    color: '#e0e0e0',
+    marginBottom: '20px',
+    fontWeight: '600'
+  },
+  settingsSection: {
+    marginBottom: '20px'
+  },
+  settingsLabel: {
+    display: 'block',
+    color: '#e0e0e0',
+    marginBottom: '8px',
+    fontSize: '14px',
+    fontWeight: '500'
+  },
+  settingsSelect: {
+    width: '100%',
+    padding: '10px',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '14px',
+    outline: 'none',
+    cursor: 'pointer'
+  },
+  settingsTextarea: {
+    width: '100%',
+    padding: '12px',
+    background: '#1a1a1a',
+    color: '#e0e0e0',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontFamily: 'monospace',
+    outline: 'none',
+    resize: 'vertical'
+  },
+  settingsPreview: {
+    width: '100%',
+    padding: '12px',
+    background: '#1a1a1a',
+    color: '#4a9eff',
+    border: '1px solid #3a3a3a',
+    borderRadius: '6px',
+    fontSize: '13px',
+    fontFamily: 'monospace',
+    overflowX: 'auto',
+    margin: 0
+  },
+  settingsHint: {
+    fontSize: '12px',
+    color: '#808080',
+    marginTop: '6px'
+  },
+  modalActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: '12px',
+    marginTop: '24px'
+  },
+  modalBtn: {
+    padding: '10px 20px',
+    background: '#4a9eff',
+    color: 'white',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontSize: '14px',
+    fontWeight: '600'
+  }
+};
+
+// Add hover effects via CSS
+if (typeof document !== 'undefined') {
+  const style = document.createElement('style');
+  style.textContent = `
+    button:hover:not(:disabled) {
+      opacity: 0.9;
+      transform: scale(1.02);
+    }
+    button:active:not(:disabled) {
+      transform: scale(0.98);
+    }
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    .contact-item:hover {
+      background: #333333 !important;
+    }
+    .contact-item:active {
+      background: #2a2a2a !important;
+    }
+    input:focus {
+      border-color: #4a9eff !important;
+    }
+  `;
+  document.head.appendChild(style);
 }
