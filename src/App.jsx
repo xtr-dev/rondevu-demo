@@ -1137,6 +1137,37 @@ export default function App() {
                           Connected
                         </div>
                       </div>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          // Close/disconnect the chat
+                          const chat = activeChats[contact];
+                          if (chat) {
+                            try {
+                              chat.channel?.close();
+                              chat.connection?.close();
+                            } catch (err) {
+                              console.error('Error closing chat:', err);
+                            }
+                            setActiveChats(prev => {
+                              const updated = { ...prev };
+                              delete updated[contact];
+                              return updated;
+                            });
+                            if (selectedChat === contact) {
+                              setSelectedChat(null);
+                            }
+                            toast.success(`Disconnected from ${contact}`);
+                          }
+                        }}
+                        style={{
+                          ...styles.removeBtn,
+                          background: '#dc3545'
+                        }}
+                        title="Disconnect"
+                      >
+                        ✕
+                      </button>
                     </div>
                   ))}
               </div>
@@ -1208,12 +1239,12 @@ export default function App() {
                           }}
                           style={{
                             ...styles.removeBtn,
-                            background: '#ff9800',
+                            background: '#dc3545',
                             marginRight: '4px'
                           }}
-                          title="Close chat"
+                          title="End chat"
                         >
-                          ⏸
+                          ✕
                         </button>
                       )}
                       <button
