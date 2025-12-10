@@ -522,6 +522,10 @@ export default function App() {
             }
           }));
 
+          // Auto-select the incoming chat to show it immediately
+          setSelectedChat(peerUsername);
+          toast.success(`${peerUsername} connected to you!`);
+
           // Send acknowledgment
           dc.send(JSON.stringify({
             type: 'identify_ack',
@@ -680,6 +684,9 @@ export default function App() {
         console.log('Client connection state:', pc.connectionState);
         if (pc.connectionState === 'connected') {
           toast.success(`Connected to ${contact}`, { id: 'connecting' });
+          // Stop ICE polling once connected
+          clearInterval(icePolling);
+          console.log('[Answerer] Stopped ICE polling - connection established');
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
           toast.error(`Disconnected from ${contact}`);
           clearInterval(icePolling);
@@ -969,6 +976,42 @@ export default function App() {
                 Add
               </button>
             </div>
+
+            {/* Incoming Chats (not in contacts) */}
+            {Object.keys(activeChats).filter(username => !contacts.includes(username) && activeChats[username].status === 'connected').length > 0 && (
+              <div style={styles.contactsList}>
+                <div style={styles.contactsHeader}>
+                  Incoming Chats ({Object.keys(activeChats).filter(username => !contacts.includes(username) && activeChats[username].status === 'connected').length})
+                </div>
+                {Object.keys(activeChats)
+                  .filter(username => !contacts.includes(username) && activeChats[username].status === 'connected')
+                  .map(contact => (
+                    <div
+                      key={contact}
+                      className="contact-item"
+                      style={{
+                        ...styles.contactItem,
+                        ...(selectedChat === contact ? styles.contactItemActive : {})
+                      }}
+                      onClick={() => setSelectedChat(contact)}
+                    >
+                      <div style={styles.contactAvatar}>
+                        {contact[0].toUpperCase()}
+                        <span style={{
+                          ...styles.contactDot,
+                          background: '#4caf50'
+                        }}></span>
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <div style={styles.contactName}>{contact}</div>
+                        <div style={styles.contactStatus}>
+                          Connected (incoming)
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+              </div>
+            )}
 
             {/* Contacts List */}
             <div style={styles.contactsList}>
