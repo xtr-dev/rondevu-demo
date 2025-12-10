@@ -164,15 +164,18 @@ export default function App() {
 
         const parsedKeypair = savedKeypair ? JSON.parse(savedKeypair) : undefined;
 
+        // Create Rondevu instance
+        // If no username is saved, use undefined to let Rondevu handle it
         const service = new Rondevu({
           apiUrl: API_URL,
-          username: savedUsername || 'temp',
+          username: savedUsername,
           keypair: parsedKeypair,
         });
 
         await service.initialize();
         setRondevu(service);
 
+        // Check if we have a saved username and if it's claimed
         if (savedUsername && savedKeypair) {
           console.log('[Init] Checking if username is claimed...');
           const isClaimed = await service.isUsernameClaimed();
@@ -187,6 +190,7 @@ export default function App() {
             setSetupStep('claim');
           }
         } else {
+          // No saved username, prompt user to claim one
           setSetupStep('claim');
         }
       } catch (err) {
