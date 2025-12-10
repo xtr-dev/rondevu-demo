@@ -594,6 +594,8 @@ export default function App() {
 
       // Poll for ICE candidates
       const lastIceTimestamp = { current: 0 };
+      console.log(`[Answerer] Starting ICE candidate polling for offer ${serviceData.offerId}`);
+
       const icePolling = setInterval(async () => {
         try {
           const result = await rondevu.getOfferIceCandidates(
@@ -602,14 +604,20 @@ export default function App() {
             lastIceTimestamp.current
           );
 
+          if (result.candidates.length > 0) {
+            console.log(`[Answerer] Received ${result.candidates.length} ICE candidate(s) from offerer`);
+          }
+
           for (const item of result.candidates) {
             if (item.candidate && item.candidate.candidate) {
               try {
+                console.log(`[Answerer] Adding offerer ICE candidate:`, item.candidate);
                 const rtcCandidate = new RTCIceCandidate(item.candidate);
                 await pc.addIceCandidate(rtcCandidate);
                 lastIceTimestamp.current = item.createdAt;
+                console.log(`✅ [Answerer] Successfully added offerer ICE candidate`);
               } catch (err) {
-                console.warn('Failed to process ICE candidate:', err);
+                console.warn('[Answerer] Failed to process ICE candidate:', err);
                 lastIceTimestamp.current = item.createdAt;
               }
             } else {
@@ -618,8 +626,10 @@ export default function App() {
           }
         } catch (err) {
           if (err.message?.includes('404') || err.message?.includes('410')) {
-            console.warn('Offer expired, stopping ICE polling');
+            console.warn('[Answerer] Offer expired, stopping ICE polling');
             clearInterval(icePolling);
+          } else {
+            console.error('[Answerer] Error polling ICE candidates:', err);
           }
         }
       }, 1000);
@@ -627,11 +637,14 @@ export default function App() {
       // Send local ICE candidates
       pc.onicecandidate = (event) => {
         if (event.candidate) {
+          console.log(`[Answerer] Sending ICE candidate to server:`, event.candidate);
           rondevu.addOfferIceCandidates(
             fqn,
             serviceData.offerId,
             [event.candidate.toJSON()]
-          ).catch(err => console.error('Failed to send ICE candidate:', err));
+          ).then(() => {
+            console.log(`✅ [Answerer] Successfully sent ICE candidate to server`);
+          }).catch(err => console.error('[Answerer] Failed to send ICE candidate:', err));
         }
       };
 
