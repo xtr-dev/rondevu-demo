@@ -253,17 +253,22 @@ export default function App() {
           const pc = offerIdToPeerConnection[offerId];
 
           if (pc && candidates.length > 0) {
-            console.log(`[Host Polling] Processing ${candidates.length} ICE candidate(s) for offer ${offerId}`);
+            // Filter for answerer candidates only (offerer doesn't need their own candidates back)
+            const answererCandidates = candidates.filter(item => item.role === 'answerer');
 
-            for (const item of candidates) {
-              if (item.candidate) {
-                try {
-                  await pc.addIceCandidate(new RTCIceCandidate(item.candidate));
-                  totalIceCandidates++;
-                  // Update timestamp
-                  setLastAnswerTimestamp(prev => Math.max(prev, item.createdAt));
-                } catch (err) {
-                  console.warn(`[Host Polling] Failed to add ICE candidate for offer ${offerId}:`, err);
+            if (answererCandidates.length > 0) {
+              console.log(`[Host Polling] Processing ${answererCandidates.length} answerer ICE candidate(s) for offer ${offerId}`);
+
+              for (const item of answererCandidates) {
+                if (item.candidate) {
+                  try {
+                    await pc.addIceCandidate(new RTCIceCandidate(item.candidate));
+                    totalIceCandidates++;
+                    // Update timestamp
+                    setLastAnswerTimestamp(prev => Math.max(prev, item.createdAt));
+                  } catch (err) {
+                    console.warn(`[Host Polling] Failed to add ICE candidate for offer ${offerId}:`, err);
+                  }
                 }
               }
             }
@@ -271,7 +276,7 @@ export default function App() {
         }
 
         if (totalIceCandidates > 0) {
-          console.log(`✅ [Host Polling] Added ${totalIceCandidates} ICE candidate(s)`);
+          console.log(`✅ [Host Polling] Added ${totalIceCandidates} answerer ICE candidate(s)`);
         }
       } catch (err) {
         console.error('[Host Polling] Error polling:', err);
