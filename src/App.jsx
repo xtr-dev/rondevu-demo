@@ -90,7 +90,6 @@ export default function App() {
   const [activeChats, setActiveChats] = useState({});
   const [selectedChat, setSelectedChat] = useState(null);
   const [messageInputs, setMessageInputs] = useState({});
-  const [pendingRequests, setPendingRequests] = useState({}); // Pending incoming connection requests
 
   // Service - we publish one service that can accept multiple connections
   const [myServicePublished, setMyServicePublished] = useState(false);
@@ -513,23 +512,34 @@ export default function App() {
         if (msg.type === 'identify') {
           // Peer identified themselves
           peerUsername = msg.from;
-          console.log(`📡 New connection request from: ${peerUsername}`);
+          console.log(`📡 New connection from: ${peerUsername}`);
 
-          // Add to pending requests for approval
-          setPendingRequests(prev => ({
+          // Auto-accept and open chat immediately (same UX as answerer side)
+          setActiveChats(prev => ({
             ...prev,
             [peerUsername]: {
               username: peerUsername,
               channel: dc,
               connection: pc,
-              timestamp: Date.now()
+              messages: prev[peerUsername]?.messages || [],
+              status: 'connected',
+              role: 'host'
             }
           }));
 
+          // Auto-select the chat
+          setSelectedChat(peerUsername);
+
+          // Send acknowledgment
+          dc.send(JSON.stringify({
+            type: 'identify_ack',
+            from: hostUsername
+          }));
+
           // Show notification
-          toast(`${peerUsername} wants to chat with you`, {
-            duration: 5000,
-            icon: '👤'
+          toast.success(`${peerUsername} connected!`, {
+            duration: 3000,
+            icon: '💬'
           });
         } else if (msg.type === 'message' && peerUsername) {
           // Chat message
@@ -785,68 +795,6 @@ export default function App() {
     }));
   };
 
-  // Accept incoming connection request
-  const handleAcceptRequest = (username) => {
-    const request = pendingRequests[username];
-    if (!request) return;
-
-    console.log(`✅ Accepting connection request from: ${username}`);
-
-    // Move from pending to active chats
-    setActiveChats(prev => ({
-      ...prev,
-      [username]: {
-        username: username,
-        channel: request.channel,
-        connection: request.connection,
-        messages: prev[username]?.messages || [],
-        status: 'connected',
-        role: 'host'
-      }
-    }));
-
-    // Remove from pending
-    setPendingRequests(prev => {
-      const updated = { ...prev };
-      delete updated[username];
-      return updated;
-    });
-
-    // Send acknowledgment
-    request.channel.send(JSON.stringify({
-      type: 'identify_ack',
-      from: myUsername
-    }));
-
-    // Auto-select the chat
-    setSelectedChat(username);
-    toast.success(`Connected with ${username}!`);
-  };
-
-  // Deny incoming connection request
-  const handleDenyRequest = (username) => {
-    const request = pendingRequests[username];
-    if (!request) return;
-
-    console.log(`❌ Denying connection request from: ${username}`);
-
-    // Close the connection
-    try {
-      request.channel.close();
-      request.connection.close();
-    } catch (err) {
-      console.error('Error closing connection:', err);
-    }
-
-    // Remove from pending
-    setPendingRequests(prev => {
-      const updated = { ...prev };
-      delete updated[username];
-      return updated;
-    });
-
-    toast.success(`Declined request from ${username}`);
-  };
 
   // Send message
   const handleSendMessage = (contact) => {
@@ -1040,75 +988,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* Pending Connection Requests */}
-            {Object.keys(pendingRequests).length > 0 && (
-              <div style={styles.contactsList}>
-                <div style={{...styles.contactsHeader, background: '#ff9800', color: 'white'}}>
-                  Connection Requests ({Object.keys(pendingRequests).length})
-                </div>
-                {Object.keys(pendingRequests).map(username => (
-                  <div
-                    key={username}
-                    style={{
-                      ...styles.contactItem,
-                      flexDirection: 'column',
-                      alignItems: 'stretch',
-                      padding: '12px'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', marginBottom: '8px' }}>
-                      <div style={styles.contactAvatar}>
-                        {username[0].toUpperCase()}
-                        <span style={{
-                          ...styles.contactDot,
-                          background: '#ff9800'
-                        }}></span>
-                      </div>
-                      <div style={{ flex: 1 }}>
-                        <div style={styles.contactName}>{username}</div>
-                        <div style={styles.contactStatus}>
-                          Wants to chat
-                        </div>
-                      </div>
-                    </div>
-                    <div style={{ display: 'flex', gap: '8px' }}>
-                      <button
-                        onClick={() => handleAcceptRequest(username)}
-                        style={{
-                          flex: 1,
-                          padding: '8px',
-                          background: '#4caf50',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '500'
-                        }}
-                      >
-                        ✓ Accept
-                      </button>
-                      <button
-                        onClick={() => handleDenyRequest(username)}
-                        style={{
-                          flex: 1,
-                          padding: '8px',
-                          background: '#f44336',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '6px',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                          fontWeight: '500'
-                        }}
-                      >
-                        ✗ Decline
-                      </button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
 
             {/* Incoming Chats (not in contacts) */}
             {Object.keys(activeChats).filter(username => !contacts.includes(username) && activeChats[username].status === 'connected').length > 0 && (
