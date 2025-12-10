@@ -241,17 +241,6 @@ export default function App() {
                 sdp: answer.sdp
               });
 
-              // Update host connection status to show answer was received
-              setHostConnections(prev => {
-                const updated = { ...prev };
-                for (const key in updated) {
-                  if (updated[key].offerId === answer.offerId) {
-                    updated[key] = { ...updated[key], status: 'answered' };
-                  }
-                }
-                return updated;
-              });
-
               // Update last answer timestamp
               setLastAnswerTimestamp(prev => Math.max(prev, answer.answeredAt));
 
@@ -447,33 +436,6 @@ export default function App() {
         const conn = connections[idx];
         offerMapping[offer.offerId] = conn.pc;
         hostConnMap[`host-${idx}`] = { pc: conn.pc, dc: conn.dc, offerId: offer.offerId, status: 'waiting' };
-
-        // Track connection state changes
-        conn.pc.onconnectionstatechange = () => {
-          console.log(`[Host] Connection state for offer ${offer.offerId}:`, conn.pc.connectionState);
-
-          if (conn.pc.connectionState === 'connecting') {
-            setHostConnections(prev => {
-              const updated = { ...prev };
-              for (const key in updated) {
-                if (updated[key].offerId === offer.offerId) {
-                  updated[key] = { ...updated[key], status: 'connecting' };
-                }
-              }
-              return updated;
-            });
-          } else if (conn.pc.connectionState === 'connected') {
-            setHostConnections(prev => {
-              const updated = { ...prev };
-              for (const key in updated) {
-                if (updated[key].offerId === offer.offerId) {
-                  updated[key] = { ...updated[key], status: 'connected' };
-                }
-              }
-              return updated;
-            });
-          }
-        };
 
         // Send buffered ICE candidates
         if (conn.candidateBuffer && conn.candidateBuffer.length > 0) {
@@ -1026,40 +988,6 @@ export default function App() {
               </button>
             </div>
 
-
-            {/* Connection Pool Status */}
-            {myServicePublished && Object.keys(hostConnections).length > 0 && (
-              <div style={styles.contactsList}>
-                <div style={styles.contactsHeader}>
-                  Connection Pool ({Object.keys(hostConnections).filter(k => hostConnections[k].status !== 'waiting').length}/{Object.keys(hostConnections).length})
-                </div>
-                <div style={{ padding: '12px', fontSize: '12px', color: '#666' }}>
-                  {Object.keys(hostConnections).map(key => {
-                    const conn = hostConnections[key];
-                    let statusColor = '#999';
-                    let statusText = 'Waiting';
-
-                    if (conn.status === 'answered') {
-                      statusColor = '#ff9800';
-                      statusText = 'Answer received';
-                    } else if (conn.status === 'connecting') {
-                      statusColor = '#2196f3';
-                      statusText = 'Connecting...';
-                    } else if (conn.status === 'connected') {
-                      statusColor = '#4caf50';
-                      statusText = 'Connected';
-                    }
-
-                    return (
-                      <div key={key} style={{ display: 'flex', alignItems: 'center', marginBottom: '6px', gap: '8px' }}>
-                        <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: statusColor }}></div>
-                        <span>{statusText}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
 
             {/* Incoming Chats (not in contacts) */}
             {Object.keys(activeChats).filter(username => !contacts.includes(username) && activeChats[username].status === 'connected').length > 0 && (
