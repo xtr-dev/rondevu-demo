@@ -395,12 +395,23 @@ export default function App() {
         // Setup handlers (will be enhanced with offerId later)
         setupHostConnection(pc, dc, myUsername);
 
+        // Buffer ICE candidates until we have offerId
+        const candidateBuffer = [];
+        pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            console.log(`[Host] Buffering ICE candidate for connection ${i}:`, event.candidate);
+            candidateBuffer.push(event.candidate.toJSON());
+          } else {
+            console.log(`[Host] ICE gathering complete for connection ${i} (buffered ${candidateBuffer.length} candidates)`);
+          }
+        };
+
         // Create offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
 
         offers.push({ sdp: offer.sdp });
-        connections.push({ pc, dc, index: i });
+        connections.push({ pc, dc, index: i, candidateBuffer });
       }
 
       // Publish service
@@ -422,14 +433,31 @@ export default function App() {
         offerMapping[offer.offerId] = conn.pc;
         hostConnMap[`host-${idx}`] = { pc: conn.pc, dc: conn.dc, offerId: offer.offerId, status: 'waiting' };
 
-        // Setup ICE candidate handler for offerer
+        // Send buffered ICE candidates
+        if (conn.candidateBuffer && conn.candidateBuffer.length > 0) {
+          console.log(`[Host] Sending ${conn.candidateBuffer.length} buffered ICE candidates for offer ${offer.offerId}`);
+          rondevu.addOfferIceCandidates(
+            fqn,
+            offer.offerId,
+            conn.candidateBuffer
+          ).then(() => {
+            console.log(`✅ [Host] Successfully sent ${conn.candidateBuffer.length} buffered ICE candidates for offer ${offer.offerId}`);
+          }).catch(err => console.error(`[Host] Failed to send buffered ICE candidates for offer ${offer.offerId}:`, err));
+        }
+
+        // Setup ICE candidate handler for any future candidates
         conn.pc.onicecandidate = (event) => {
           if (event.candidate) {
+            console.log(`[Host] Sending new ICE candidate for offer ${offer.offerId}:`, event.candidate);
             rondevu.addOfferIceCandidates(
               fqn,
               offer.offerId,
               [event.candidate.toJSON()]
-            ).catch(err => console.error(`[Host] Failed to send ICE candidate for offer ${offer.offerId}:`, err));
+            ).then(() => {
+              console.log(`✅ [Host] Successfully sent ICE candidate for offer ${offer.offerId}`);
+            }).catch(err => console.error(`[Host] Failed to send ICE candidate for offer ${offer.offerId}:`, err));
+          } else {
+            console.log(`[Host] ICE gathering complete for offer ${offer.offerId} (null candidate)`);
           }
         };
       });
