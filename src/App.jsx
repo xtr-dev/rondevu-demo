@@ -94,6 +94,8 @@ export default function App() {
   // Service - we publish one service that can accept multiple connections
   const [myServicePublished, setMyServicePublished] = useState(false);
   const [hostConnections, setHostConnections] = useState({}); // Track incoming connections as host
+  const [offerIdToPeerConnection, setOfferIdToPeerConnection] = useState({}); // Map offerId to RTCPeerConnection
+  const [lastAnswerTimestamp, setLastAnswerTimestamp] = useState(0); // Track last answer timestamp for polling
 
   const chatEndRef = useRef(null);
 
@@ -208,6 +210,53 @@ export default function App() {
     }
   }, [setupStep, myUsername, rondevu, myServicePublished]);
 
+  // Poll for answered offers (host side)
+  useEffect(() => {
+    if (!myServicePublished || !rondevu || Object.keys(offerIdToPeerConnection).length === 0) {
+      return;
+    }
+
+    console.log('[Answer Polling] Starting to poll for answers...');
+
+    const pollForAnswers = async () => {
+      try {
+        const result = await rondevu.getAnsweredOffers(lastAnswerTimestamp);
+
+        if (result.offers.length > 0) {
+          console.log(`[Answer Polling] Found ${result.offers.length} new answered offer(s)`);
+
+          for (const answer of result.offers) {
+            const pc = offerIdToPeerConnection[answer.offerId];
+
+            if (pc && pc.signalingState !== 'stable') {
+              console.log(`[Answer Polling] Setting remote answer for offer ${answer.offerId}`);
+
+              await pc.setRemoteDescription({
+                type: 'answer',
+                sdp: answer.sdp
+              });
+
+              // Update last answer timestamp
+              setLastAnswerTimestamp(prev => Math.max(prev, answer.answeredAt));
+
+              console.log(`✅ [Answer Polling] Remote answer set for offer ${answer.offerId}`);
+            } else if (pc) {
+              console.log(`[Answer Polling] Skipping offer ${answer.offerId} - already in stable state`);
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[Answer Polling] Error polling for answers:', err);
+      }
+    };
+
+    // Poll every 2 seconds
+    const interval = setInterval(pollForAnswers, 2000);
+    pollForAnswers(); // Initial poll
+
+    return () => clearInterval(interval);
+  }, [myServicePublished, rondevu, offerIdToPeerConnection, lastAnswerTimestamp]);
+
   // Check online status periodically
   useEffect(() => {
     if (setupStep !== 'ready' || !rondevu) return;
@@ -303,6 +352,7 @@ export default function App() {
       // We'll create a pool of offers manually
       const offers = [];
       const poolSize = 10; // Support up to 10 simultaneous connections
+      const connections = []; // Track connections before publishing
 
       console.log('[Publish] Creating', poolSize, 'peer connections...');
       for (let i = 0; i < poolSize; i++) {
@@ -317,12 +367,7 @@ export default function App() {
         await pc.setLocalDescription(offer);
 
         offers.push({ sdp: offer.sdp });
-
-        // Store connection for later
-        setHostConnections(prev => ({
-          ...prev,
-          [`host-${i}`]: { pc, dc, status: 'waiting' }
-        }));
+        connections.push({ pc, dc, index: i });
       }
 
       // Publish service
@@ -330,14 +375,27 @@ export default function App() {
       console.log('[Publish] Publishing service with FQN:', fqn);
       console.log('[Publish] Public key:', rondevu.getPublicKey());
 
-      await rondevu.publishService({
+      const publishResult = await rondevu.publishService({
         serviceFqn: fqn,
         offers,
         ttl: 300000, // 5 minutes
       });
 
+      // Map offerIds to peer connections
+      const offerMapping = {};
+      const hostConnMap = {};
+      publishResult.offers.forEach((offer, idx) => {
+        const conn = connections[idx];
+        offerMapping[offer.offerId] = conn.pc;
+        hostConnMap[`host-${idx}`] = { pc: conn.pc, dc: conn.dc, offerId: offer.offerId, status: 'waiting' };
+      });
+
+      setOfferIdToPeerConnection(offerMapping);
+      setHostConnections(hostConnMap);
       setMyServicePublished(true);
+
       console.log('✅ Chat service published successfully with', poolSize, 'offers');
+      console.log('[Publish] Offer IDs:', Object.keys(offerMapping));
       toast.success('Chat service started!');
     } catch (err) {
       console.error('[Publish] Failed to publish service:', err);
