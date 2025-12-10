@@ -210,26 +210,27 @@ export default function App() {
     }
   }, [setupStep, myUsername, rondevu, myServicePublished]);
 
-  // Poll for answered offers (host side)
+  // Combined polling for answers and ICE candidates (host side)
   useEffect(() => {
     if (!myServicePublished || !rondevu || Object.keys(offerIdToPeerConnection).length === 0) {
       return;
     }
 
-    console.log('[Answer Polling] Starting to poll for answers...');
+    console.log('[Host Polling] Starting combined polling for answers and ICE candidates...');
 
-    const pollForAnswers = async () => {
+    const poll = async () => {
       try {
-        const result = await rondevu.getAnsweredOffers(lastAnswerTimestamp);
+        const result = await rondevu.pollOffers(lastAnswerTimestamp);
 
-        if (result.offers.length > 0) {
-          console.log(`[Answer Polling] Found ${result.offers.length} new answered offer(s)`);
+        // Process answers
+        if (result.answers.length > 0) {
+          console.log(`[Host Polling] Found ${result.answers.length} new answer(s)`);
 
-          for (const answer of result.offers) {
+          for (const answer of result.answers) {
             const pc = offerIdToPeerConnection[answer.offerId];
 
             if (pc && pc.signalingState !== 'stable') {
-              console.log(`[Answer Polling] Setting remote answer for offer ${answer.offerId}`);
+              console.log(`[Host Polling] Setting remote answer for offer ${answer.offerId}`);
 
               await pc.setRemoteDescription({
                 type: 'answer',
@@ -239,20 +240,47 @@ export default function App() {
               // Update last answer timestamp
               setLastAnswerTimestamp(prev => Math.max(prev, answer.answeredAt));
 
-              console.log(`✅ [Answer Polling] Remote answer set for offer ${answer.offerId}`);
+              console.log(`✅ [Host Polling] Remote answer set for offer ${answer.offerId}`);
             } else if (pc) {
-              console.log(`[Answer Polling] Skipping offer ${answer.offerId} - already in stable state`);
+              console.log(`[Host Polling] Skipping offer ${answer.offerId} - already in stable state`);
             }
           }
         }
+
+        // Process ICE candidates
+        let totalIceCandidates = 0;
+        for (const [offerId, candidates] of Object.entries(result.iceCandidates)) {
+          const pc = offerIdToPeerConnection[offerId];
+
+          if (pc && candidates.length > 0) {
+            console.log(`[Host Polling] Processing ${candidates.length} ICE candidate(s) for offer ${offerId}`);
+
+            for (const item of candidates) {
+              if (item.candidate) {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(item.candidate));
+                  totalIceCandidates++;
+                  // Update timestamp
+                  setLastAnswerTimestamp(prev => Math.max(prev, item.createdAt));
+                } catch (err) {
+                  console.warn(`[Host Polling] Failed to add ICE candidate for offer ${offerId}:`, err);
+                }
+              }
+            }
+          }
+        }
+
+        if (totalIceCandidates > 0) {
+          console.log(`✅ [Host Polling] Added ${totalIceCandidates} ICE candidate(s)`);
+        }
       } catch (err) {
-        console.error('[Answer Polling] Error polling for answers:', err);
+        console.error('[Host Polling] Error polling:', err);
       }
     };
 
     // Poll every 2 seconds
-    const interval = setInterval(pollForAnswers, 2000);
-    pollForAnswers(); // Initial poll
+    const interval = setInterval(poll, 2000);
+    poll(); // Initial poll
 
     return () => clearInterval(interval);
   }, [myServicePublished, rondevu, offerIdToPeerConnection, lastAnswerTimestamp]);
@@ -359,7 +387,7 @@ export default function App() {
         const pc = new RTCPeerConnection(getCurrentRtcConfig());
         const dc = pc.createDataChannel('chat');
 
-        // Setup handlers
+        // Setup handlers (will be enhanced with offerId later)
         setupHostConnection(pc, dc, myUsername);
 
         // Create offer
@@ -381,13 +409,24 @@ export default function App() {
         ttl: 300000, // 5 minutes
       });
 
-      // Map offerIds to peer connections
+      // Map offerIds to peer connections and setup ICE handlers
       const offerMapping = {};
       const hostConnMap = {};
       publishResult.offers.forEach((offer, idx) => {
         const conn = connections[idx];
         offerMapping[offer.offerId] = conn.pc;
         hostConnMap[`host-${idx}`] = { pc: conn.pc, dc: conn.dc, offerId: offer.offerId, status: 'waiting' };
+
+        // Setup ICE candidate handler for offerer
+        conn.pc.onicecandidate = (event) => {
+          if (event.candidate) {
+            rondevu.addOfferIceCandidates(
+              fqn,
+              offer.offerId,
+              [event.candidate.toJSON()]
+            ).catch(err => console.error(`[Host] Failed to send ICE candidate for offer ${offer.offerId}:`, err));
+          }
+        };
       });
 
       setOfferIdToPeerConnection(offerMapping);
