@@ -16,9 +16,7 @@
     "qrcode": "^1.5.4",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-hot-toast": "^2.6.0"
-  },
-  "optionalDependencies": {
+    "react-hot-toast": "^2.6.0",
     "wrtc": "^0.4.7"
   },
   "devDependencies": {

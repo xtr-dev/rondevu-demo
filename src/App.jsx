@@ -338,7 +338,7 @@ export default function App() {
         keypair: rondevu?.getKeypair(), // Use existing keypair if available, otherwise will generate new one
       });
       await newService.initialize();
-      await newService.claimUsername();
+      // Username will be auto-claimed on first publish
 
       const keypair = newService.getKeypair();
       setRondevu(newService);
@@ -382,17 +382,8 @@ export default function App() {
           console.error('[Publish] Failed to check username:', e);
         }
 
-        // Try to claim username
-        console.log('[Publish] Attempting to claim username...');
-        toast.loading('Claiming username...', { id: 'claim' });
-        try {
-          await rondevu.claimUsername();
-          toast.success('Username claimed!', { id: 'claim' });
-        } catch (claimErr) {
-          console.error('[Publish] Failed to claim username:', claimErr);
-          toast.error(`Failed to claim username: ${claimErr.message}`, { id: 'claim' });
-          return;
-        }
+        // Username will be auto-claimed on first publish
+        console.log('[Publish] Username will be auto-claimed on first publish');
       }
 
       // We'll create a pool of offers manually
@@ -427,13 +418,12 @@ export default function App() {
         connections.push({ pc, dc, index: i, candidateBuffer });
       }
 
-      // Publish service
-      const fqn = `${CHAT_SERVICE}@${myUsername}`;
-      console.log('[Publish] Publishing service with FQN:', fqn);
+      // Publish service (username auto-appended)
+      console.log('[Publish] Publishing service:', CHAT_SERVICE);
       console.log('[Publish] Public key:', rondevu.getPublicKey());
 
       const publishResult = await rondevu.publishService({
-        serviceFqn: fqn,
+        service: CHAT_SERVICE,
         offers,
         ttl: 300000, // 5 minutes
       });
@@ -515,41 +505,66 @@ export default function App() {
     };
 
     dc.onmessage = (event) => {
+      console.log('[Host] Received message:', event.data);
       try {
         const msg = JSON.parse(event.data);
+        console.log('[Host] Parsed message:', msg);
 
         if (msg.type === 'identify') {
           // Peer identified themselves
           peerUsername = msg.from;
+          const peerPublicKey = msg.publicKey;
           console.log(`📡 New connection from: ${peerUsername}`);
 
-          // Auto-accept and open chat immediately (same UX as answerer side)
-          setActiveChats(prev => ({
-            ...prev,
-            [peerUsername]: {
-              username: peerUsername,
-              channel: dc,
-              connection: pc,
-              messages: prev[peerUsername]?.messages || [],
-              status: 'connected',
-              role: 'host'
+          // Verify username claim (async)
+          (async () => {
+            try {
+              // Check if username is claimed and verify public key matches
+              if (peerPublicKey) {
+                const result = await rondevu.getAPI().isUsernameAvailable(peerUsername);
+                if (!result) {
+                  // Username is claimed, verify the public key
+                  // TODO: Actually get the claimed public key from server and verify
+                  // For now, we'll accept any claimed username
+                  console.log(`✅ Username ${peerUsername} is claimed (not verifying key yet)`);
+                }
+              }
+
+              // Auto-accept and open chat immediately (same UX as answerer side)
+              setActiveChats(prev => ({
+                ...prev,
+                [peerUsername]: {
+                  username: peerUsername,
+                  channel: dc,
+                  connection: pc,
+                  messages: prev[peerUsername]?.messages || [],
+                  status: 'connected',
+                  role: 'host'
+                }
+              }));
+
+              // Auto-select the chat
+              setSelectedChat(peerUsername);
+
+              // Send acknowledgment with our public key
+              dc.send(JSON.stringify({
+                type: 'identify_ack',
+                from: hostUsername,
+                publicKey: rondevu.getPublicKey()
+              }));
+
+              // Show notification
+              toast.success(`${peerUsername} connected!`, {
+                duration: 3000,
+                icon: '💬'
+              });
+            } catch (err) {
+              console.error('Failed to verify username:', err);
+              toast.error(`Failed to verify ${peerUsername}`);
+              dc.close();
+              pc.close();
             }
-          }));
-
-          // Auto-select the chat
-          setSelectedChat(peerUsername);
-
-          // Send acknowledgment
-          dc.send(JSON.stringify({
-            type: 'identify_ack',
-            from: hostUsername
-          }));
-
-          // Show notification
-          toast.success(`${peerUsername} connected!`, {
-            duration: 3000,
-            icon: '💬'
-          });
+          })();
         } else if (msg.type === 'message' && peerUsername) {
           // Chat message
           setActiveChats(prev => ({
@@ -745,10 +760,11 @@ export default function App() {
     dc.onopen = () => {
       console.log('Client data channel opened with', contact);
 
-      // Send identification
+      // Send identification with public key
       dc.send(JSON.stringify({
         type: 'identify',
-        from: myUsername
+        from: myUsername,
+        publicKey: rondevu.getPublicKey()
       }));
     };
 
@@ -761,8 +777,10 @@ export default function App() {
     };
 
     dc.onmessage = (event) => {
+      console.log('[Answerer] Received message:', event.data);
       try {
         const msg = JSON.parse(event.data);
+        console.log('[Answerer] Parsed message:', msg);
 
         if (msg.type === 'identify_ack') {
           // Connection acknowledged

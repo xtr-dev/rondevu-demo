@@ -296,6 +296,15 @@ await peer.createOffer({
 - **RTCDataChannel** - P2P messaging
 - **QRCode** - QR code generation for easy topic sharing
 
+## Node.js Service Hosting
+
+Want to create a Node.js service that browser clients can connect to? See:
+- **[NODE_HOST_GUIDE.md](NODE_HOST_GUIDE.md)** - Complete guide to hosting WebRTC services in Node.js
+- **[test-connect.js](test-connect.js)** - Working example of a Node.js client
+- **[TEST_README.md](TEST_README.md)** - Instructions for running the test client
+
+Perfect for creating chat bots, data processors, game servers, or any service that browsers can connect to via WebRTC!
+
 ## License
 
 MIT
