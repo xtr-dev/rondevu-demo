@@ -2,15 +2,32 @@
 /**
  * Test script to connect to @bas's chat service and send a "hello" message
  *
- * Usage: node test-connect.js
+ * Setup:
+ *   npm install --save-optional wrtc
  *
- * Requires Node.js 19+ or Node.js 18 with --experimental-global-webcrypto
+ * Usage:
+ *   node test-connect.js
+ *
+ * Requires:
+ *   - Node.js 19+ or Node.js 18 with --experimental-global-webcrypto
+ *   - wrtc package (install with: npm install wrtc)
  */
 
 import { Rondevu, RondevuSignaler, NodeCryptoAdapter } from '@xtr-dev/rondevu-client'
-import wrtc from 'wrtc'
 
-const { RTCPeerConnection } = wrtc
+// Try to import wrtc, provide helpful error if not found
+let RTCPeerConnection
+try {
+  const wrtc = await import('wrtc')
+  RTCPeerConnection = wrtc.default.RTCPeerConnection
+} catch (error) {
+  console.error('❌ Error: wrtc package not found')
+  console.error('\nThe wrtc package is required for WebRTC support in Node.js.')
+  console.error('Install it with:')
+  console.error('\n  npm install wrtc')
+  console.error('\nNote: wrtc requires native compilation and may take a few minutes to install.')
+  process.exit(1)
+}
 
 // Configuration
 const API_URL = 'https://rondevu.xtrdev.workers.dev'
