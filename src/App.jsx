@@ -428,6 +428,9 @@ export default function App() {
         ttl: 300000, // 5 minutes
       });
 
+      // Get the full service FQN for ICE candidate operations
+      const fqn = publishResult.serviceFqn;
+
       // Map offerIds to peer connections and setup ICE handlers
       const offerMapping = {};
       const hostConnMap = {};
