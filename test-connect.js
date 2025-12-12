@@ -82,84 +82,88 @@ async function main() {
     console.log('\n3. Creating WebRTC peer connection...')
     const pc = new RTCPeerConnection(RTC_CONFIG)
 
-    // 4. Create data channel
-    console.log('4. Creating data channel...')
-    const dc = pc.createDataChannel('chat')
-
-    // Set up data channel handlers
+    // 4. Wait for data channel (we're the answerer, host creates the channel)
+    console.log('4. Waiting for data channel from host...')
+    let dc = null
     let identified = false
 
-    dc.onopen = () => {
-      console.log('   ✓ Data channel opened!')
-      console.log(`   Data channel state: ${dc.readyState}`)
+    // Function to setup data channel handlers
+    const setupDataChannel = (channel) => {
+      dc = channel
 
-      // Longer delay to ensure both sides are ready
-      setTimeout(() => {
-        console.log(`   Data channel state before send: ${dc.readyState}`)
-        if (dc.readyState !== 'open') {
-          console.error(`   ❌ Data channel not open: ${dc.readyState}`)
-          return
+      dc.onopen = () => {
+        console.log('   ✓ Data channel opened!')
+        console.log(`   Data channel state: ${dc.readyState}`)
+
+        // Longer delay to ensure both sides are ready
+        setTimeout(() => {
+          console.log(`   Data channel state before send: ${dc.readyState}`)
+          if (dc.readyState !== 'open') {
+            console.error(`   ❌ Data channel not open: ${dc.readyState}`)
+            return
+          }
+
+          // Send identify message (demo protocol)
+          console.log(`📤 Sending identify message...`)
+          const identifyMsg = JSON.stringify({
+            type: 'identify',
+            from: rondevu.getUsername()
+          })
+          console.log(`   Message:`, identifyMsg)
+          dc.send(identifyMsg)
+          console.log(`   ✓ Identify message sent, bufferedAmount: ${dc.bufferedAmount}`)
+        }, 500)
+      }
+
+      dc.onclose = () => {
+        console.log('   ❌ Data channel closed!')
+      }
+
+      dc.onmessage = (event) => {
+        console.log(`📥 RAW DATA:`, event.data)
+        try {
+          const msg = JSON.parse(event.data)
+          console.log(`📥 Parsed message:`, JSON.stringify(msg, null, 2))
+
+          if (msg.type === 'identify_ack' && !identified) {
+            identified = true
+            console.log(`✅ Connection acknowledged by @${msg.from}`)
+
+            // Now send the actual chat message
+            console.log(`📤 Sending chat message: "${MESSAGE}"`)
+            dc.send(JSON.stringify({
+              type: 'message',
+              text: MESSAGE
+            }))
+
+            // Keep connection open longer to see if we get a response
+            setTimeout(() => {
+              console.log('\n✅ Test completed successfully!')
+              dc.close()
+              pc.close()
+              process.exit(0)
+            }, 5000)
+          } else if (msg.type === 'message') {
+            console.log(`💬 @${msg.from || 'peer'}: ${msg.text}`)
+          } else {
+            console.log(`📥 Unknown message type: ${msg.type}`)
+          }
+        } catch (err) {
+          console.log(`📥 Parse error:`, err.message)
+          console.log(`📥 Raw data was:`, event.data)
         }
+      }
 
-        // Send identify message (demo protocol)
-        console.log(`📤 Sending identify message...`)
-        const identifyMsg = JSON.stringify({
-          type: 'identify',
-          from: rondevu.getUsername()
-        })
-        console.log(`   Message:`, identifyMsg)
-        dc.send(identifyMsg)
-        console.log(`   ✓ Identify message sent, bufferedAmount: ${dc.bufferedAmount}`)
-      }, 500)
-    }
-
-    dc.onclose = () => {
-      console.log('   ❌ Data channel closed!')
-    }
-
-    dc.onerror = (error) => {
-      console.error('❌ Data channel error:', error)
-      process.exit(1)
-    }
-
-    dc.onmessage = (event) => {
-      console.log(`📥 RAW DATA:`, event.data)
-      try {
-        const msg = JSON.parse(event.data)
-        console.log(`📥 Parsed message:`, JSON.stringify(msg, null, 2))
-
-        if (msg.type === 'identify_ack' && !identified) {
-          identified = true
-          console.log(`✅ Connection acknowledged by @${msg.from}`)
-
-          // Now send the actual chat message
-          console.log(`📤 Sending chat message: "${MESSAGE}"`)
-          dc.send(JSON.stringify({
-            type: 'message',
-            text: MESSAGE
-          }))
-
-          // Keep connection open longer to see if we get a response
-          setTimeout(() => {
-            console.log('\n✅ Test completed successfully!')
-            dc.close()
-            pc.close()
-            process.exit(0)
-          }, 5000)
-        } else if (msg.type === 'message') {
-          console.log(`💬 @${msg.from || 'peer'}: ${msg.text}`)
-        } else {
-          console.log(`📥 Unknown message type: ${msg.type}`)
-        }
-      } catch (err) {
-        console.log(`📥 Parse error:`, err.message)
-        console.log(`📥 Raw data was:`, event.data)
+      dc.onerror = (error) => {
+        console.error('❌ Data channel error:', error)
+        process.exit(1)
       }
     }
 
-    dc.onerror = (error) => {
-      console.error('❌ Data channel error:', error)
-      process.exit(1)
+    // Receive data channel from host (we're the answerer)
+    pc.ondatachannel = (event) => {
+      console.log('   ✓ Data channel received from host!')
+      setupDataChannel(event.channel)
     }
 
     // 5. Set up ICE candidate exchange FIRST
