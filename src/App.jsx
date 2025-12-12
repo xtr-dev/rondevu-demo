@@ -849,7 +849,7 @@ export default function App() {
     }
   };
 
-  if (!rondevu) {
+  if (setupStep === 'init') {
     return <div style={styles.loading}>Loading...</div>;
   }
 
