@@ -20,7 +20,8 @@ import { Rondevu, RondevuSignaler, NodeCryptoAdapter } from '@xtr-dev/rondevu-cl
 // Import wrtc
 let wrtc
 try {
-  wrtc = await import('wrtc')
+  const wrtcModule = await import('wrtc')
+  wrtc = wrtcModule.default || wrtcModule
 } catch (error) {
   console.error('❌ Error: wrtc package not found or failed to load')
   console.error('\nThe wrtc package is required for WebRTC support in Node.js.')
