@@ -328,18 +328,19 @@ export default function App() {
 
   // Claim username
   const handleClaimUsername = async () => {
-    if (!rondevu || !usernameInput) return;
+    if (!usernameInput) return;
 
     try {
-      const keypair = rondevu.getKeypair();
+      // Create new Rondevu instance (will generate keypair if needed)
       const newService = new Rondevu({
         apiUrl: API_URL,
         username: usernameInput,
-        keypair,
+        keypair: rondevu?.getKeypair(), // Use existing keypair if available, otherwise will generate new one
       });
       await newService.initialize();
       await newService.claimUsername();
 
+      const keypair = newService.getKeypair();
       setRondevu(newService);
       setMyUsername(usernameInput);
       localStorage.setItem('rondevu-username', usernameInput);
