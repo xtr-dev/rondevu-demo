@@ -87,22 +87,6 @@ const API_URL = 'https://api.ronde.vu'
 const USERNAME = 'chatbot'  // Your service username
 const SERVICE = 'chat:2.0.0'  // Service name (username will be auto-appended)
 
-// TURN server configuration for manual RTCPeerConnection setup
-// Note: If using automatic offer management, configure via Rondevu.connect() iceServers option
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    {
-      urls: [
-        'turn:57.129.61.67:3478?transport=tcp',
-        'turn:57.129.61.67:3478?transport=udp',
-      ],
-      username: 'webrtcuser',
-      credential: 'supersecretpassword'
-    }
-  ]
-}
-
 async function main() {
   console.log('🤖 Starting Chat Bot Service')
   console.log('='.repeat(50))
@@ -119,195 +103,109 @@ async function main() {
   console.log(`   ✓ Connected as: ${rondevu.getUsername()}`)
   console.log(`   ✓ Public key: ${rondevu.getPublicKey()?.substring(0, 20)}...`)
 
-  // 2. Username will be auto-claimed on first authenticated request (publishService)
-  console.log('2. Username will be auto-claimed on first publish...')
+  // 2. Publish service with automatic offer management
+  console.log('2. Publishing service with automatic offer management...')
 
-  // Keep track of active connections
-  const connections = new Map()
+  await rondevu.publishService({
+    service: SERVICE,
+    maxOffers: 5,  // Maintain up to 5 concurrent offers
+    offerFactory: async (rtcConfig) => {
+      console.log('\n3. Creating new WebRTC offer...')
+      const pc = new RTCPeerConnection(rtcConfig)
 
-  // 3. Create connection handler for new peers
-  async function createOffer() {
-    console.log('\n3. Creating new WebRTC offer...')
-    const pc = new RTCPeerConnection(RTC_CONFIG)
+      // IMPORTANT: Offerer creates the data channel
+      const dc = pc.createDataChannel('chat', {
+        ordered: true,
+        maxRetransmits: 3
+      })
 
-    // IMPORTANT: Offerer creates the data channel
-    const dc = pc.createDataChannel('chat', {
-      ordered: true,
-      maxRetransmits: 3
-    })
+      // Set up data channel handlers
+      dc.onopen = () => {
+        console.log('   ✓ Data channel opened with new peer!')
 
-    // Set up data channel handlers
-    dc.onopen = () => {
-      console.log('   ✓ Data channel opened with new peer!')
-
-      // Send welcome message
-      dc.send(JSON.stringify({
-        type: 'identify',
-        from: USERNAME,
-        publicKey: rondevu.getPublicKey()
-      }))
-    }
-
-    dc.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        console.log(`📥 Message from peer:`, msg)
-
-        if (msg.type === 'identify') {
-          // Peer identified themselves
-          console.log(`   Peer: @${msg.from}`)
-
-          // Send acknowledgment
-          dc.send(JSON.stringify({
-            type: 'identify_ack',
-            from: USERNAME,
-            publicKey: rondevu.getPublicKey()
-          }))
-        } else if (msg.type === 'message') {
-          // Received chat message - echo it back
-          console.log(`   💬 @${msg.from || 'peer'}: ${msg.text}`)
-
-          dc.send(JSON.stringify({
-            type: 'message',
-            from: USERNAME,
-            text: `Echo: ${msg.text}`
-          }))
-        }
-      } catch (err) {
-        console.error('Failed to parse message:', err)
+        // Send welcome message
+        dc.send(JSON.stringify({
+          type: 'identify',
+          from: USERNAME,
+          publicKey: rondevu.getPublicKey()
+        }))
       }
-    }
 
-    dc.onclose = () => {
-      console.log('   ❌ Data channel closed')
-    }
-
-    dc.onerror = (error) => {
-      console.error('   ❌ Data channel error:', error)
-    }
-
-    // 4. Create offer
-    const offer = await pc.createOffer()
-    await pc.setLocalDescription(offer)
-    console.log('   ✓ Local description set')
-
-    // 5. Publish service with offer
-    console.log('4. Publishing service to Rondevu...')
-    const result = await rondevu.publishService({
-      service: SERVICE,
-      offers: [{ sdp: offer.sdp }],
-      ttl: 300000  // 5 minutes
-    })
-
-    const offerId = result.offers[0].offerId
-    const serviceFqn = result.serviceFqn  // Full FQN with username
-    console.log(`   ✓ Service published with offer ID: ${offerId}`)
-
-    // Store connection info
-    connections.set(offerId, { pc, dc, answered: false })
-
-    // 6. Set up ICE candidate handler BEFORE candidates are gathered
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        console.log('   📤 Sending ICE candidate')
+      dc.onmessage = (event) => {
         try {
-          // wrtc doesn't have toJSON, manually serialize
-          const candidateInit = {
-            candidate: event.candidate.candidate,
-            sdpMLineIndex: event.candidate.sdpMLineIndex,
-            sdpMid: event.candidate.sdpMid,
-            usernameFragment: event.candidate.usernameFragment
+          const msg = JSON.parse(event.data)
+          console.log(`📥 Message from peer:`, msg)
+
+          if (msg.type === 'identify') {
+            // Peer identified themselves
+            console.log(`   Peer: @${msg.from}`)
+
+            // Send acknowledgment
+            dc.send(JSON.stringify({
+              type: 'identify_ack',
+              from: USERNAME,
+              publicKey: rondevu.getPublicKey()
+            }))
+          } else if (msg.type === 'message') {
+            // Received chat message - echo it back
+            console.log(`   💬 @${msg.from || 'peer'}: ${msg.text}`)
+
+            dc.send(JSON.stringify({
+              type: 'message',
+              from: USERNAME,
+              text: `Echo: ${msg.text}`
+            }))
           }
-          await rondevu.getAPIPublic().addOfferIceCandidates(
-            serviceFqn,
-            offerId,
-            [candidateInit]
-          )
         } catch (err) {
-          console.error('Failed to send ICE candidate:', err)
-        }
-      }
-    }
-
-    // 7. Monitor connection state
-    pc.onconnectionstatechange = () => {
-      console.log(`   Connection state: ${pc.connectionState}`)
-      if (pc.connectionState === 'connected') {
-        console.log(`   ✅ Connected to peer via offer ${offerId}`)
-      } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-        console.log(`   ❌ Connection ${pc.connectionState} for offer ${offerId}`)
-        connections.delete(offerId)
-      }
-    }
-
-    pc.oniceconnectionstatechange = () => {
-      console.log(`   ICE state: ${pc.iceConnectionState}`)
-    }
-
-    return offerId
-  }
-
-  // 8. Poll for answers and ICE candidates
-  console.log('5. Starting to poll for answers...')
-  let lastPollTimestamp = 0
-
-  const pollInterval = setInterval(async () => {
-    try {
-      const result = await rondevu.pollOffers(lastPollTimestamp)
-
-      // Process answers
-      for (const answer of result.answers) {
-        const conn = connections.get(answer.offerId)
-        if (conn && !conn.answered) {
-          console.log(`\n📥 Received answer for offer ${answer.offerId}`)
-          await conn.pc.setRemoteDescription({ type: 'answer', sdp: answer.sdp })
-          conn.answered = true
-          lastPollTimestamp = answer.answeredAt
-
-          // Create new offer for next peer
-          await createOffer()
+          console.error('Failed to parse message:', err)
         }
       }
 
-      // Process ICE candidates
-      for (const [offerId, candidates] of Object.entries(result.iceCandidates)) {
-        const conn = connections.get(offerId)
-        if (conn) {
-          const answererCandidates = candidates.filter(c => c.role === 'answerer')
+      dc.onclose = () => {
+        console.log('   ❌ Data channel closed')
+      }
 
-          for (const item of answererCandidates) {
-            if (item.candidate) {
-              console.log(`   📥 Received ICE candidate for offer ${offerId}`)
-              await conn.pc.addIceCandidate(item.candidate)
-              lastPollTimestamp = Math.max(lastPollTimestamp, item.createdAt)
-            }
-          }
+      dc.onerror = (error) => {
+        console.error('   ❌ Data channel error:', error)
+      }
+
+      // Monitor connection state
+      pc.onconnectionstatechange = () => {
+        console.log(`   Connection state: ${pc.connectionState}`)
+        if (pc.connectionState === 'connected') {
+          console.log(`   ✅ Connected to peer!`)
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+          console.log(`   ❌ Connection ${pc.connectionState}`)
         }
       }
-    } catch (err) {
-      console.error('Polling error:', err.message)
-    }
-  }, 1000)
 
-  // 9. Create initial offer
-  await createOffer()
+      pc.oniceconnectionstatechange = () => {
+        console.log(`   ICE state: ${pc.iceConnectionState}`)
+      }
 
-  console.log('\n✅ Service is live! Waiting for connections...')
-  console.log(`   Service: ${SERVICE}`)
-  console.log(`   Username: ${USERNAME}`)
-  console.log(`   Clients can connect by discovering: ${SERVICE}@${USERNAME}`)
+      // Create offer
+      const offer = await pc.createOffer()
+      await pc.setLocalDescription(offer)
+      console.log('   ✓ Offer created and local description set')
 
-  // Handle graceful shutdown
+      return { pc, dc, offer }
+    },
+    ttl: 300000  // 5 minutes per offer
+  })
+
+  console.log(`   ✓ Service published: ${SERVICE}@${USERNAME}`)
+
+  // 3. Start automatic offer pool management
+  console.log('3. Starting automatic offer pool management...')
+  await rondevu.startFilling()
+  console.log(`   ✓ Maintaining up to 5 concurrent offers`)
+  console.log(`   ✓ Polling for answers and ICE candidates`)
+  console.log(`\n✅ Service is live! Clients can connect to: ${SERVICE}@${USERNAME}`)
+
+  // 4. Handle graceful shutdown
   process.on('SIGINT', () => {
     console.log('\n\n🛑 Shutting down...')
-    clearInterval(pollInterval)
-
-    for (const [offerId, conn] of connections.entries()) {
-      console.log(`   Closing connection ${offerId}`)
-      conn.dc?.close()
-      conn.pc?.close()
-    }
-
+    rondevu.stopFilling()
     process.exit(0)
   })
 }
@@ -342,51 +240,49 @@ import { Rondevu } from '@xtr-dev/rondevu-client'
 const API_URL = 'https://api.ronde.vu'
 const SERVICE_FQN = 'chat:2.0.0@chatbot'  // Full service name with username
 
-// TURN server configuration for manual RTCPeerConnection setup
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: 'stun:stun.l.google.com:19302' },
-    {
-      urls: [
-        'turn:57.129.61.67:3478?transport=tcp',
-        'turn:57.129.61.67:3478?transport=udp',
-      ],
-      username: 'webrtcuser',
-      credential: 'supersecretpassword'
-    }
-  ]
-}
-
 async function connectToService() {
   console.log('🌐 Connecting to chat bot...')
 
-  // 1. Connect to Rondevu (anonymous user with ICE server preset)
+  // 1. Connect to Rondevu with ICE server preset
   const rondevu = await Rondevu.connect({
     apiUrl: API_URL,
-    iceServers: 'ipv4-turn',  // Use preset or custom config
+    iceServers: 'ipv4-turn'  // Use same preset as host
     // No username = auto-generated anonymous username
   })
 
   console.log(`✓ Connected as: ${rondevu.getUsername()}`)
 
-  // 2. Discover service
+  // 2. Connect to service (automatic WebRTC setup)
   console.log(`Looking for service: ${SERVICE_FQN}`)
-  const serviceData = await rondevu.getService(SERVICE_FQN)
-  console.log(`✓ Found service from @${serviceData.username}`)
 
-  // 3. Create peer connection
-  const pc = new RTCPeerConnection(RTC_CONFIG)
+  const connection = await rondevu.connectToService({
+    serviceFqn: SERVICE_FQN,
+    onConnection: ({ dc, peerUsername }) => {
+      console.log(`✅ Connected to @${peerUsername}!`)
 
-  // 4. IMPORTANT: Answerer receives data channel via ondatachannel
-  // DO NOT create a channel with pc.createDataChannel()
-  let dc = null
+      // Set up message handler
+      dc.addEventListener('message', (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          console.log('📥 Message:', msg)
 
-  pc.ondatachannel = (event) => {
-    console.log('✓ Data channel received from host!')
-    dc = event.channel
+          if (msg.type === 'identify') {
+            console.log(`   Peer identified as: @${msg.from}`)
+          } else if (msg.type === 'identify_ack') {
+            console.log('   ✅ Connection acknowledged!')
 
-    dc.onopen = () => {
-      console.log('✓ Data channel opened!')
+            // Send a test message
+            dc.send(JSON.stringify({
+              type: 'message',
+              text: 'Hello from browser!'
+            }))
+          } else if (msg.type === 'message') {
+            console.log(`   💬 @${msg.from}: ${msg.text}`)
+          }
+        } catch (err) {
+          console.error('Parse error:', err)
+        }
+      })
 
       // Send identify message
       dc.send(JSON.stringify({
@@ -395,117 +291,17 @@ async function connectToService() {
         publicKey: rondevu.getPublicKey()
       }))
     }
+  })
 
-    dc.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data)
-        console.log('📥 Message:', msg)
+  console.log('✅ Connection established!')
 
-        if (msg.type === 'identify') {
-          console.log(`Connected to @${msg.from}`)
-        } else if (msg.type === 'identify_ack') {
-          console.log('✅ Connection acknowledged!')
-
-          // Send a test message
-          dc.send(JSON.stringify({
-            type: 'message',
-            text: 'Hello from browser!'
-          }))
-        } else if (msg.type === 'message') {
-          console.log(`💬 @${msg.from}: ${msg.text}`)
-        }
-      } catch (err) {
-        console.error('Parse error:', err)
-      }
-    }
-
-    dc.onclose = () => {
-      console.log('❌ Data channel closed')
-    }
-
-    dc.onerror = (error) => {
-      console.error('❌ Data channel error:', error)
+  // Monitor connection state
+  connection.pc.onconnectionstatechange = () => {
+    console.log(`Connection state: ${connection.pc.connectionState}`)
+    if (connection.pc.connectionState === 'failed' || connection.pc.connectionState === 'closed') {
+      console.log('❌ Connection ended')
     }
   }
-
-  // 5. Set up ICE candidate handler BEFORE setting remote description
-  pc.onicecandidate = async (event) => {
-    if (event.candidate) {
-      console.log('📤 Sending ICE candidate')
-      try {
-        await rondevu.getAPIPublic().addOfferIceCandidates(
-          serviceData.serviceFqn,
-          serviceData.offerId,
-          [event.candidate.toJSON()]
-        )
-      } catch (err) {
-        console.error('Failed to send ICE candidate:', err)
-      }
-    }
-  }
-
-  // 6. Set remote offer
-  console.log('Setting remote offer...')
-  await pc.setRemoteDescription({ type: 'offer', sdp: serviceData.sdp })
-
-  // 7. Create and set local answer
-  console.log('Creating answer...')
-  const answer = await pc.createAnswer()
-  await pc.setLocalDescription(answer)
-
-  // 8. Send answer to server
-  console.log('Sending answer...')
-  await rondevu.postOfferAnswer(
-    serviceData.serviceFqn,
-    serviceData.offerId,
-    answer.sdp
-  )
-
-  // 9. Poll for remote ICE candidates
-  console.log('Polling for ICE candidates...')
-  let lastIceTimestamp = 0
-
-  const pollInterval = setInterval(async () => {
-    try {
-      const result = await rondevu.getOfferIceCandidates(
-        serviceData.serviceFqn,
-        serviceData.offerId,
-        lastIceTimestamp
-      )
-
-      for (const item of result.candidates) {
-        if (item.candidate) {
-          console.log('📥 Received ICE candidate')
-          await pc.addIceCandidate(new RTCIceCandidate(item.candidate))
-          lastIceTimestamp = item.createdAt
-        }
-      }
-    } catch (err) {
-      console.error('ICE polling error:', err)
-    }
-  }, 1000)
-
-  // 10. Monitor connection state
-  pc.onconnectionstatechange = () => {
-    console.log(`Connection state: ${pc.connectionState}`)
-
-    if (pc.connectionState === 'connected') {
-      console.log('✅ Successfully connected!')
-      clearInterval(pollInterval)
-    } else if (pc.connectionState === 'failed') {
-      console.error('❌ Connection failed')
-      clearInterval(pollInterval)
-    } else if (pc.connectionState === 'closed') {
-      console.log('Connection closed')
-      clearInterval(pollInterval)
-    }
-  }
-
-  pc.oniceconnectionstatechange = () => {
-    console.log(`ICE state: ${pc.iceConnectionState}`)
-  }
-
-  console.log('⏳ Waiting for connection...')
 }
 
 // Run it
