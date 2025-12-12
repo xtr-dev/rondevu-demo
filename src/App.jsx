@@ -232,7 +232,7 @@ export default function App() {
 
     const poll = async () => {
       try {
-        const result = await rondevu.pollOffers(lastAnswerTimestamp);
+        const result = await rondevu.poll(lastAnswerTimestamp);
 
         // Process answers
         if (result.answers.length > 0) {
