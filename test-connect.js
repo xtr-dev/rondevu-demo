@@ -101,9 +101,10 @@ async function main() {
     }
 
     dc.onmessage = (event) => {
+      console.log(`📥 RAW DATA:`, event.data)
       try {
         const msg = JSON.parse(event.data)
-        console.log(`📥 Received message:`, msg)
+        console.log(`📥 Parsed message:`, JSON.stringify(msg, null, 2))
 
         if (msg.type === 'identify_ack' && !identified) {
           identified = true
@@ -125,9 +126,12 @@ async function main() {
           }, 5000)
         } else if (msg.type === 'message') {
           console.log(`💬 @${msg.from || 'peer'}: ${msg.text}`)
+        } else {
+          console.log(`📥 Unknown message type: ${msg.type}`)
         }
       } catch (err) {
-        console.log(`📥 Received (raw): ${event.data}`)
+        console.log(`📥 Parse error:`, err.message)
+        console.log(`📥 Raw data was:`, event.data)
       }
     }
 
