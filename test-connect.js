@@ -40,7 +40,7 @@ const TARGET_USER = 'bas'
 const SERVICE_FQN = `chat:2.0.0@${TARGET_USER}`
 const MESSAGE = 'hello'
 
-// TURN server configuration (matches demo default: 'ipv4-turn')
+// TURN server configuration (IPv4 TURN only - matches demo default)
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:57.129.61.67:3478' },
@@ -110,43 +110,54 @@ async function main() {
       process.exit(1)
     }
 
-    // 5. Set remote offer
-    console.log('5. Setting remote offer...')
+    // 5. Set up ICE candidate exchange FIRST
+    console.log('5. Setting up ICE candidate exchange...')
+
+    // Send our ICE candidates
+    pc.onicecandidate = async (event) => {
+      if (event.candidate) {
+        console.log('   📤 Sending ICE candidate')
+        try {
+          await rondevu.getAPIPublic().addOfferIceCandidates(
+            serviceData.serviceFqn,
+            serviceData.offerId,
+            [event.candidate.toJSON()]
+          )
+        } catch (err) {
+          console.error('   ❌ Failed to send ICE candidate:', err.message)
+        }
+      }
+    }
+
+    // Start polling for remote ICE candidates
+    const signaler = new RondevuSignaler(rondevu, SERVICE_FQN, TARGET_USER)
+    signaler.offerId = serviceData.offerId
+    signaler.serviceFqn = serviceData.serviceFqn
+
+    signaler.addListener((candidate) => {
+      console.log('   📥 Received ICE candidate')
+      pc.addIceCandidate(candidate)
+    })
+
+    // 6. Set remote offer
+    console.log('6. Setting remote offer...')
     await pc.setRemoteDescription({ type: 'offer', sdp: serviceData.sdp })
     console.log('   ✓ Remote offer set')
 
-    // 6. Create and set local answer
-    console.log('6. Creating answer...')
+    // 7. Create and set local answer (this triggers ICE gathering)
+    console.log('7. Creating answer...')
     const answer = await pc.createAnswer()
     await pc.setLocalDescription(answer)
     console.log('   ✓ Local answer set')
 
-    // 7. Send answer to server
-    console.log('7. Sending answer to signaling server...')
+    // 8. Send answer to server
+    console.log('8. Sending answer to signaling server...')
     await rondevu.postOfferAnswer(
       serviceData.serviceFqn,
       serviceData.offerId,
       answer.sdp
     )
     console.log('   ✓ Answer sent')
-
-    // 8. Handle ICE candidates
-    console.log('8. Setting up ICE candidate exchange...')
-    const signaler = new RondevuSignaler(rondevu, SERVICE_FQN, TARGET_USER)
-
-    // Send our ICE candidates
-    pc.onicecandidate = async (event) => {
-      if (event.candidate) {
-        console.log('   📤 Sending ICE candidate')
-        await signaler.addIceCandidate(event.candidate)
-      }
-    }
-
-    // Receive remote ICE candidates
-    signaler.addListener((candidate) => {
-      console.log('   📥 Received ICE candidate')
-      pc.addIceCandidate(candidate)
-    })
 
     // Monitor connection state
     pc.onconnectionstatechange = () => {
