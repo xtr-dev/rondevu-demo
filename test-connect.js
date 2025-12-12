@@ -91,13 +91,20 @@ async function main() {
 
     dc.onopen = () => {
       console.log('   ✓ Data channel opened!')
+      console.log(`   Data channel state: ${dc.readyState}`)
 
-      // Send identify message (demo protocol)
-      console.log(`📤 Sending identify message...`)
-      dc.send(JSON.stringify({
-        type: 'identify',
-        from: rondevu.getUsername()
-      }))
+      // Small delay to ensure both sides are ready
+      setTimeout(() => {
+        // Send identify message (demo protocol)
+        console.log(`📤 Sending identify message...`)
+        const identifyMsg = JSON.stringify({
+          type: 'identify',
+          from: rondevu.getUsername()
+        })
+        console.log(`   Message:`, identifyMsg)
+        dc.send(identifyMsg)
+        console.log(`   ✓ Identify message sent`)
+      }, 100)
     }
 
     dc.onmessage = (event) => {
