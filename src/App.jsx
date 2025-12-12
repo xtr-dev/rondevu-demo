@@ -79,7 +79,16 @@ export default function App() {
 
   // Setup
   const [setupStep, setSetupStep] = useState('init'); // init, claim, ready
-  const [usernameInput, setUsernameInput] = useState('');
+
+  // Generate a random username suggestion
+  const generateRandomUsername = () => {
+    const timestamp = Date.now().toString(36);
+    const random = Array.from(crypto.getRandomValues(new Uint8Array(3)))
+      .map(b => b.toString(16).padStart(2, '0')).join('');
+    return `anon-${timestamp}-${random}`;
+  };
+
+  const [usernameInput, setUsernameInput] = useState(generateRandomUsername());
 
   // Contacts
   const [contacts, setContacts] = useState([]);
@@ -163,19 +172,18 @@ export default function App() {
 
         const parsedKeypair = savedKeypair ? JSON.parse(savedKeypair) : undefined;
 
-        // Create Rondevu instance
-        // If no username is saved, use undefined to let Rondevu handle it
-        const service = new Rondevu({
-          apiUrl: API_URL,
-          username: savedUsername,
-          keypair: parsedKeypair,
-        });
-
-        await service.initialize();
-        setRondevu(service);
-
         // Check if we have a saved username and if it's claimed
         if (savedUsername && savedKeypair) {
+          // Create Rondevu instance with saved credentials
+          const service = new Rondevu({
+            apiUrl: API_URL,
+            username: savedUsername,
+            keypair: parsedKeypair,
+          });
+
+          await service.initialize();
+          setRondevu(service);
+
           console.log('[Init] Checking if username is claimed...');
           const isClaimed = await service.isUsernameClaimed();
           console.log('[Init] Username claimed:', isClaimed);
@@ -927,7 +935,7 @@ export default function App() {
                 <p style={styles.setupDesc}>Choose your unique username</p>
                 <input
                   type="text"
-                  placeholder="Enter username"
+                  placeholder="Choose a username"
                   value={usernameInput}
                   onChange={(e) => setUsernameInput(e.target.value.toLowerCase())}
                   onKeyPress={(e) => e.key === 'Enter' && handleClaimUsername()}
