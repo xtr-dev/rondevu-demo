@@ -118,10 +118,17 @@ async function main() {
       if (event.candidate) {
         console.log('   📤 Sending ICE candidate')
         try {
+          // wrtc doesn't have toJSON, manually create the object
+          const candidateInit = {
+            candidate: event.candidate.candidate,
+            sdpMLineIndex: event.candidate.sdpMLineIndex,
+            sdpMid: event.candidate.sdpMid,
+            usernameFragment: event.candidate.usernameFragment
+          }
           await rondevu.getAPIPublic().addOfferIceCandidates(
             serviceData.serviceFqn,
             serviceData.offerId,
-            [event.candidate.toJSON()]
+            [candidateInit]
           )
         } catch (err) {
           console.error('   ❌ Failed to send ICE candidate:', err.message)
