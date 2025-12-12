@@ -2,37 +2,41 @@
 /**
  * Test script to connect to @bas's chat service and send a "hello" message
  *
- * Setup:
- *   npm install --save-optional wrtc
+ * IMPORTANT: This script requires the 'wrtc' package which must be installed separately.
+ * See TEST_README.md for detailed installation instructions.
  *
- * Usage:
- *   node test-connect.js
+ * Quick start:
+ *   npm install wrtc
+ *   npm test
  *
- * Requires:
- *   - Node.js 19+ or Node.js 18 with --experimental-global-webcrypto
- *   - wrtc package (install with: npm install wrtc)
+ * Requirements:
+ *   - Node.js 19+ (or Node.js 18 with --experimental-global-webcrypto)
+ *   - wrtc package (requires native compilation)
+ *   - Build tools (python, make, g++)
  */
 
 import { Rondevu, RondevuSignaler, NodeCryptoAdapter } from '@xtr-dev/rondevu-client'
 
-// Try to import wrtc, provide helpful error if not found
-let RTCPeerConnection
+// Import wrtc
+let wrtc
 try {
-  const wrtc = await import('wrtc')
-  RTCPeerConnection = wrtc.default.RTCPeerConnection
+  wrtc = await import('wrtc')
 } catch (error) {
-  console.error('❌ Error: wrtc package not found')
+  console.error('❌ Error: wrtc package not found or failed to load')
   console.error('\nThe wrtc package is required for WebRTC support in Node.js.')
   console.error('Install it with:')
   console.error('\n  npm install wrtc')
   console.error('\nNote: wrtc requires native compilation and may take a few minutes to install.')
+  console.error('\nError details:', error.message)
   process.exit(1)
 }
 
+const { RTCPeerConnection } = wrtc
+
 // Configuration
-const API_URL = 'https://rondevu.xtrdev.workers.dev'
+const API_URL = 'https://api.ronde.vu'
 const TARGET_USER = 'bas'
-const SERVICE_FQN = `chat:1.0.0@${TARGET_USER}`
+const SERVICE_FQN = `chat:2.0.0@${TARGET_USER}`
 const MESSAGE = 'hello'
 
 // TURN server configuration
