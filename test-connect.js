@@ -40,7 +40,8 @@ const TARGET_USER = 'bas'
 const SERVICE_FQN = `chat:2.0.0@${TARGET_USER}`
 const MESSAGE = 'hello'
 
-// TURN server configuration (IPv4 TURN only - matches demo default)
+// TURN server configuration for manual RTCPeerConnection setup
+// Note: Answerer uses manual RTCPeerConnection, not automatic offer management
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:57.129.61.67:3478' },
@@ -60,16 +61,16 @@ async function main() {
   console.log('='.repeat(50))
 
   try {
-    // 1. Initialize Rondevu with Node crypto adapter
-    console.log('1. Initializing Rondevu client...')
-    const rondevu = new Rondevu({
+    // 1. Connect to Rondevu with Node crypto adapter and ICE preset
+    console.log('1. Connecting to Rondevu...')
+    const rondevu = await Rondevu.connect({
       apiUrl: API_URL,
       username: `test-${Date.now()}`,  // Anonymous test user
-      cryptoAdapter: new NodeCryptoAdapter()
+      cryptoAdapter: new NodeCryptoAdapter(),
+      iceServers: 'ipv4-turn'  // Use ICE server preset
     })
 
-    await rondevu.initialize()
-    console.log(`   ✓ Initialized as: ${rondevu.getUsername()}`)
+    console.log(`   ✓ Connected as: ${rondevu.getUsername()}`)
     console.log(`   ✓ Public key: ${rondevu.getPublicKey()?.substring(0, 20)}...`)
 
     // 2. Discover service
@@ -181,7 +182,7 @@ async function main() {
             sdpMid: event.candidate.sdpMid,
             usernameFragment: event.candidate.usernameFragment
           }
-          await rondevu.getAPIPublic().addOfferIceCandidates(
+          await rondevu.addOfferIceCandidates(
             serviceData.serviceFqn,
             serviceData.offerId,
             [candidateInit]
