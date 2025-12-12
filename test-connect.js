@@ -40,16 +40,14 @@ const TARGET_USER = 'bas'
 const SERVICE_FQN = `chat:2.0.0@${TARGET_USER}`
 const MESSAGE = 'hello'
 
-// TURN server configuration
+// TURN server configuration (matches demo default: 'ipv4-turn')
 const RTC_CONFIG = {
   iceServers: [
-    { urls: 'stun:stun.share.fish:3478' },
+    { urls: 'stun:57.129.61.67:3478' },
     {
       urls: [
-        'turns:turn.share.fish:5349?transport=tcp',
-        'turns:turn.share.fish:5349?transport=udp',
-        'turn:turn.share.fish:3478?transport=tcp',
-        'turn:turn.share.fish:3478?transport=udp',
+        'turn:57.129.61.67:3478?transport=tcp',
+        'turn:57.129.61.67:3478?transport=udp',
       ],
       username: 'webrtcuser',
       credential: 'supersecretpassword'
