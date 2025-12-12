@@ -175,13 +175,13 @@ export default function App() {
         // Check if we have a saved username and if it's claimed
         if (savedUsername && savedKeypair) {
           // Create Rondevu instance with saved credentials
-          const service = new Rondevu({
+          const service = await Rondevu.connect({
             apiUrl: API_URL,
             username: savedUsername,
             keypair: parsedKeypair,
+            iceServers: rtcPreset, // Use preset: 'ipv4-turn', 'hostname-turns', 'google-stun', or 'relay-only'
           });
 
-          await service.initialize();
           setRondevu(service);
 
           console.log('[Init] Checking if username is claimed...');
@@ -332,12 +332,12 @@ export default function App() {
 
     try {
       // Create new Rondevu instance (will generate keypair if needed)
-      const newService = new Rondevu({
+      const newService = await Rondevu.connect({
         apiUrl: API_URL,
         username: usernameInput,
         keypair: rondevu?.getKeypair(), // Use existing keypair if available, otherwise will generate new one
+        iceServers: rtcPreset, // Use preset: 'ipv4-turn', 'hostname-turns', 'google-stun', or 'relay-only'
       });
-      await newService.initialize();
       // Username will be auto-claimed on first publish
 
       const keypair = newService.getKeypair();

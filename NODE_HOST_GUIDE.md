@@ -87,7 +87,8 @@ const API_URL = 'https://api.ronde.vu'
 const USERNAME = 'chatbot'  // Your service username
 const SERVICE = 'chat:2.0.0'  // Service name (username will be auto-appended)
 
-// TURN server configuration for NAT traversal
+// TURN server configuration for manual RTCPeerConnection setup
+// Note: If using automatic offer management, configure via Rondevu.connect() iceServers option
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -106,16 +107,16 @@ async function main() {
   console.log('🤖 Starting Chat Bot Service')
   console.log('='.repeat(50))
 
-  // 1. Initialize Rondevu with Node crypto adapter
-  console.log('1. Initializing Rondevu client...')
-  const rondevu = new Rondevu({
+  // 1. Connect to Rondevu with Node crypto adapter and ICE server preset
+  console.log('1. Connecting to Rondevu...')
+  const rondevu = await Rondevu.connect({
     apiUrl: API_URL,
     username: USERNAME,
-    cryptoAdapter: new NodeCryptoAdapter()
+    cryptoAdapter: new NodeCryptoAdapter(),
+    iceServers: 'ipv4-turn'  // Use preset: 'ipv4-turn', 'hostname-turns', 'google-stun', or 'relay-only'
   })
 
-  await rondevu.initialize()
-  console.log(`   ✓ Initialized as: ${rondevu.getUsername()}`)
+  console.log(`   ✓ Connected as: ${rondevu.getUsername()}`)
   console.log(`   ✓ Public key: ${rondevu.getPublicKey()?.substring(0, 20)}...`)
 
   // 2. Username will be auto-claimed on first authenticated request (publishService)
@@ -341,7 +342,7 @@ import { Rondevu } from '@xtr-dev/rondevu-client'
 const API_URL = 'https://api.ronde.vu'
 const SERVICE_FQN = 'chat:2.0.0@chatbot'  // Full service name with username
 
-// TURN server configuration
+// TURN server configuration for manual RTCPeerConnection setup
 const RTC_CONFIG = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
@@ -359,14 +360,14 @@ const RTC_CONFIG = {
 async function connectToService() {
   console.log('🌐 Connecting to chat bot...')
 
-  // 1. Initialize Rondevu (anonymous user)
-  const rondevu = new Rondevu({
+  // 1. Connect to Rondevu (anonymous user with ICE server preset)
+  const rondevu = await Rondevu.connect({
     apiUrl: API_URL,
+    iceServers: 'ipv4-turn',  // Use preset or custom config
     // No username = auto-generated anonymous username
   })
 
-  await rondevu.initialize()
-  console.log(`✓ Initialized as: ${rondevu.getUsername()}`)
+  console.log(`✓ Connected as: ${rondevu.getUsername()}`)
 
   // 2. Discover service
   console.log(`Looking for service: ${SERVICE_FQN}`)
