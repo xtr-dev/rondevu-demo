@@ -93,8 +93,14 @@ async function main() {
       console.log('   ✓ Data channel opened!')
       console.log(`   Data channel state: ${dc.readyState}`)
 
-      // Small delay to ensure both sides are ready
+      // Longer delay to ensure both sides are ready
       setTimeout(() => {
+        console.log(`   Data channel state before send: ${dc.readyState}`)
+        if (dc.readyState !== 'open') {
+          console.error(`   ❌ Data channel not open: ${dc.readyState}`)
+          return
+        }
+
         // Send identify message (demo protocol)
         console.log(`📤 Sending identify message...`)
         const identifyMsg = JSON.stringify({
@@ -103,8 +109,17 @@ async function main() {
         })
         console.log(`   Message:`, identifyMsg)
         dc.send(identifyMsg)
-        console.log(`   ✓ Identify message sent`)
-      }, 100)
+        console.log(`   ✓ Identify message sent, bufferedAmount: ${dc.bufferedAmount}`)
+      }, 500)
+    }
+
+    dc.onclose = () => {
+      console.log('   ❌ Data channel closed!')
+    }
+
+    dc.onerror = (error) => {
+      console.error('❌ Data channel error:', error)
+      process.exit(1)
     }
 
     dc.onmessage = (event) => {
