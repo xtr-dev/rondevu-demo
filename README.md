@@ -4,6 +4,8 @@
 
 Experience topic-based peer discovery and WebRTC connections using the Rondevu signaling platform.
 
+**⚠️ Note:** This demo uses an older version of the Rondevu client API (pre-v0.18.9) with the `RondevuPeer` class. The main client library (v0.18.9+) now uses `OffererConnection` and `AnswererConnection` with durable connections and automatic reconnection. See the [client README](../client/README.md) for the latest API.
+
 **Related repositories:**
 - [@xtr-dev/rondevu-client](https://github.com/xtr-dev/rondevu-client) - TypeScript client library ([npm](https://www.npmjs.com/package/@xtr-dev/rondevu-client))
 - [@xtr-dev/rondevu-server](https://github.com/xtr-dev/rondevu-server) - HTTP signaling server ([npm](https://www.npmjs.com/package/@xtr-dev/rondevu-server), [live](https://api.ronde.vu))
