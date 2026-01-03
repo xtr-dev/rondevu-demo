@@ -63,9 +63,17 @@ export default function App() {
   const [username, setUsername] = useState(null);
   const [claimUsername, setClaimUsername] = useState('');
   const [setupStep, setSetupStep] = useState('init'); // init | identity | ready
-  const [icePreset, setIcePreset] = useState('rondevu');
+  const [icePreset, setIcePreset] = useState(() => {
+    const saved = localStorage.getItem('icePreset');
+    return saved && ICE_PRESETS.some(p => p.value === saved) ? saved : 'rondevu';
+  });
   const icePresetRef = useRef(icePreset);
   icePresetRef.current = icePreset; // Always keep ref in sync
+
+  // Persist ICE preset to localStorage
+  useEffect(() => {
+    localStorage.setItem('icePreset', icePreset);
+  }, [icePreset]);
 
   // Session
   const [sessionCode, setSessionCode] = useState(null);
