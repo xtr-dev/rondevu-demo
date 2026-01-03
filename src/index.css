@@ -179,6 +179,78 @@ body {
   background: rgba(74, 158, 255, 0.2);
 }
 
+.session-code-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.session-code-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.session-code-hint {
+  font-size: 0.65rem;
+  color: #666;
+  margin-top: 2px;
+}
+
+/* QR code popout */
+.qr-popout {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 12px;
+  background: white;
+  padding: 16px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  z-index: 1000;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  animation: popout-fade-in 0.15s ease-out;
+}
+
+.qr-popout::before {
+  content: '';
+  position: absolute;
+  top: -8px;
+  left: 50%;
+  transform: translateX(-50%);
+  border-left: 8px solid transparent;
+  border-right: 8px solid transparent;
+  border-bottom: 8px solid white;
+}
+
+.qr-popout .qr-code {
+  width: 180px;
+  height: 180px;
+  display: block;
+}
+
+.qr-popout .qr-hint {
+  color: #666;
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+@keyframes popout-fade-in {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
 /* Peer info in header */
 .peer-info {
   color: #4caf50;

@@ -107,6 +107,8 @@ export default function App() {
   const [joinInput, setJoinInput] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState(null);
   const [chatOpen, setChatOpen] = useState(false); // For mobile chat toggle
+  const [showQrPopout, setShowQrPopout] = useState(false); // QR code popout on long-press
+  const longPressTimerRef = useRef(null);
 
   // Password protection
   const [sessionPassword, setSessionPassword] = useState('');
@@ -987,6 +989,21 @@ export default function App() {
     toast.success('Link copied!');
   };
 
+  // Long-press handlers for QR code popout
+  const handleSessionCodePressStart = (e) => {
+    e.preventDefault();
+    longPressTimerRef.current = setTimeout(() => {
+      setShowQrPopout(true);
+    }, 500); // 500ms long press
+  };
+
+  const handleSessionCodePressEnd = () => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  };
+
   // Render loading
   if (setupStep === 'init') {
     return (
@@ -1113,16 +1130,36 @@ export default function App() {
         <div className="header">
           <span className="header-brand">ronde.vu</span>
           <div className="header-center">
-            <span className="session-code" onClick={copyLink} title="Click to copy link">
-              {sessionCode}
-            </span>
-            <button
-              className={`lock-button ${sessionPassword ? 'locked' : ''}`}
-              onClick={handleSetPassword}
-              title={sessionPassword ? 'Password protected (click to change)' : 'Set password'}
-            >
-              {sessionPassword ? '🔒' : '🔓'}
-            </button>
+            <div className="session-code-wrapper">
+              <div className="session-code-row">
+                <span
+                  className="session-code"
+                  onClick={copyLink}
+                  onMouseDown={handleSessionCodePressStart}
+                  onMouseUp={handleSessionCodePressEnd}
+                  onMouseLeave={handleSessionCodePressEnd}
+                  onTouchStart={handleSessionCodePressStart}
+                  onTouchEnd={handleSessionCodePressEnd}
+                  title="Click to copy link, long-press for QR code"
+                >
+                  {sessionCode}
+                </span>
+                <button
+                  className={`lock-button ${sessionPassword ? 'locked' : ''}`}
+                  onClick={handleSetPassword}
+                  title={sessionPassword ? 'Password protected (click to change)' : 'Set password'}
+                >
+                  {sessionPassword ? '🔒' : '🔓'}
+                </button>
+              </div>
+              <span className="session-code-hint">hold for QR code</span>
+            </div>
+            {showQrPopout && qrDataUrl && (
+              <div className="qr-popout" onClick={() => setShowQrPopout(false)}>
+                <img src={qrDataUrl} alt="Session QR Code" className="qr-code" />
+                <span className="qr-hint">Tap to close</span>
+              </div>
+            )}
           </div>
           <button onClick={handleLeaveSession} className="button text danger">Leave</button>
         </div>
