@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { Rondevu } from '@xtr-dev/rondevu-client';
 import toast, { Toaster } from 'react-hot-toast';
 import QRCode from 'qrcode';
+import ChatPanel from './components/ChatPanel';
+import ConnectionStages, { getStageText } from './components/ConnectionStages';
 
 const API_URL = 'https://api.ronde.vu';
 const CHUNK_SIZE = 16 * 1024; // 16KB chunks
@@ -71,10 +73,9 @@ export default function App() {
   const dataChannelRef = useRef(null); // Ref for dataChannel access in callbacks
 
   // Chat
-  const [chatMessages, setChatMessages] = useState([]); // {from, text, timestamp, isYou}
+  const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState('');
-  const chatEndRef = useRef(null);
-  const chatMessagesRef = useRef([]); // Ref for access in callbacks
+  const chatMessagesRef = useRef([]);
 
   // Keep refs in sync with state
   useEffect(() => {
@@ -697,11 +698,6 @@ export default function App() {
     setChatInput('');
   };
 
-  // Auto-scroll chat
-  useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatMessages]);
-
   // Send queued files when peer connects
   useEffect(() => {
     if (dataChannel?.readyState === 'open' && queuedFiles.length > 0) {
@@ -880,74 +876,26 @@ export default function App() {
             </div>
           )}
 
-          {/* Chat */}
-          <div className="chat-container">
-            <div className="chat-header">Chat</div>
-            <div className="chat-messages">
-              {chatMessages.length === 0 && (
-                <div className="chat-empty">No messages yet</div>
-              )}
-              {chatMessages.map((msg, i) => (
-                <div key={i} className="chat-line">
-                  <span className="chat-sender">{msg.from}{msg.isYou ? ' (you)' : ''}:</span>
-                  <span className="chat-text">{msg.text}</span>
-                </div>
-              ))}
-              <div ref={chatEndRef} />
-            </div>
-            <form onSubmit={handleChatSubmit} className="chat-input-form">
-              <input
-                type="text"
-                value={chatInput}
-                onChange={(e) => setChatInput(e.target.value)}
-                placeholder="Type a message..."
-                className="chat-input"
-              />
-              <button type="submit" className="chat-send">Send</button>
-            </form>
-          </div>
+          <ChatPanel
+            messages={chatMessages}
+            input={chatInput}
+            onInputChange={setChatInput}
+            onSubmit={handleChatSubmit}
+          />
         </div>
       </div>
     );
   }
 
-  // Get stage display info
-  const getStageDisplay = () => {
-    switch (connectionStage) {
-      case 'signaling':
-        return { emoji: '📡', text: 'Signaling...' };
-      case 'checking':
-        return { emoji: '⛸️', text: 'Ice skating...' };
-      case 'connected':
-        return { emoji: '🔗', text: 'Connecting data channel...' };
-      default:
-        return { emoji: '🔄', text: 'Starting...' };
-    }
-  };
-
   // Render connecting
   if (connectionStatus === 'connecting') {
-    const stage = getStageDisplay();
     return (
       <div className="container">
         <Toaster position="top-center" />
         <div className="center-box">
           <h2 className="waiting-title">Connecting...</h2>
-          <div className="connection-stages">
-            <div className={`stage ${connectionStage === 'signaling' || connectionStage === 'checking' || connectionStage === 'connected' ? 'done' : ''}`}>
-              <span className="stage-emoji">📡</span>
-              <span className="stage-text">Signaling</span>
-            </div>
-            <div className={`stage ${connectionStage === 'checking' || connectionStage === 'connected' ? 'active' : ''} ${connectionStage === 'connected' ? 'done' : ''}`}>
-              <span className="stage-emoji">⛸️</span>
-              <span className="stage-text">Ice skating</span>
-            </div>
-            <div className={`stage ${connectionStage === 'connected' ? 'active' : ''}`}>
-              <span className="stage-emoji">🔗</span>
-              <span className="stage-text">Data channel</span>
-            </div>
-          </div>
-          <p className="waiting-subtitle">{stage.emoji} {stage.text}</p>
+          <ConnectionStages currentStage={connectionStage} />
+          <p className="waiting-subtitle">{getStageText(connectionStage)}</p>
         </div>
       </div>
     );
@@ -1051,32 +999,12 @@ export default function App() {
           </div>
         )}
 
-        {/* Chat */}
-        <div className="chat-container">
-          <div className="chat-header">Chat</div>
-          <div className="chat-messages">
-            {chatMessages.length === 0 && (
-              <div className="chat-empty">No messages yet</div>
-            )}
-            {chatMessages.map((msg, i) => (
-              <div key={i} className="chat-line">
-                <span className="chat-sender">{msg.from}{msg.isYou ? ' (you)' : ''}:</span>
-                <span className="chat-text">{msg.text}</span>
-              </div>
-            ))}
-            <div ref={chatEndRef} />
-          </div>
-          <form onSubmit={handleChatSubmit} className="chat-input-form">
-            <input
-              type="text"
-              value={chatInput}
-              onChange={(e) => setChatInput(e.target.value)}
-              placeholder="Type a message..."
-              className="chat-input"
-            />
-            <button type="submit" className="chat-send">Send</button>
-          </form>
-        </div>
+        <ChatPanel
+          messages={chatMessages}
+          input={chatInput}
+          onInputChange={setChatInput}
+          onSubmit={handleChatSubmit}
+        />
       </div>
     </div>
   );
