@@ -112,39 +112,36 @@ export default function App() {
     }
   }, []);
 
-  // Initialize - create random identity on each load
+  // Initialize - generate random username on load (but don't connect yet)
   useEffect(() => {
-    const init = async () => {
-      try {
-        // Clean up old localStorage keys from previous demo
-        localStorage.removeItem('rondevu-keypair');
-        localStorage.removeItem('rondevu-username');
-        localStorage.removeItem('rondevu-contacts');
-        localStorage.removeItem('rondevu-credential');
+    // Clean up old localStorage keys from previous demo
+    localStorage.removeItem('rondevu-keypair');
+    localStorage.removeItem('rondevu-username');
+    localStorage.removeItem('rondevu-contacts');
+    localStorage.removeItem('rondevu-credential');
 
-        // Generate random username for this session
-        const randomId = Math.random().toString(36).substring(2, 8);
-        const randomUsername = `user-${randomId}`;
-
-        console.log('[Init] Creating random identity:', randomUsername);
-
-        const client = await Rondevu.connect({
-          apiUrl: API_URL,
-          username: randomUsername,
-          iceServers: icePresetRef.current,
-          debug: true,
-        });
-
-        setRondevu(client);
-        setUsername(client.getName());
-        setSetupStep('ready');
-      } catch (err) {
-        console.error('Init failed:', err);
-        setSetupStep('identity'); // Fallback to manual identity creation
-      }
-    };
-    init();
+    // Generate random username for this session
+    const randomId = Math.random().toString(36).substring(2, 8);
+    const randomUsername = `user-${randomId}`;
+    setUsername(randomUsername);
+    setSetupStep('ready');
   }, []);
+
+  // Helper to ensure rondevu client is initialized
+  const ensureConnected = async () => {
+    if (rondevu) return rondevu;
+
+    console.log('[Init] Connecting with username:', username);
+    const client = await Rondevu.connect({
+      apiUrl: API_URL,
+      username: username,
+      iceServers: icePresetRef.current,
+      debug: true,
+    });
+    setRondevu(client);
+    setUsername(client.getName());
+    return client;
+  };
 
   // Generate QR code when session code changes
   useEffect(() => {
@@ -333,9 +330,9 @@ export default function App() {
 
   // Start session as host
   const handleStartSession = async () => {
-    if (!rondevu) return;
-
     try {
+      const client = await ensureConnected();
+
       const code = generateCode();
       const tag = codeToTag(code);
 
@@ -344,7 +341,7 @@ export default function App() {
       setConnectionStatus('waiting');
 
       // Listen for connections
-      rondevu.on('connection:opened', (offerId, connection) => {
+      client.on('connection:opened', (offerId, connection) => {
         console.log('Connection opened:', offerId);
         const dc = connection.getDataChannel();
         const pc = connection.getPeerConnection();
@@ -357,7 +354,7 @@ export default function App() {
       });
 
       // Create and start offers with session tag (auto-starts)
-      await rondevu.offer({
+      await client.offer({
         tags: [tag],
         maxOffers: 1,
       });
@@ -373,9 +370,11 @@ export default function App() {
 
   // Join session as guest
   const handleJoinSession = async () => {
-    if (!rondevu || !joinInput) return;
+    if (!joinInput) return;
 
     try {
+      const client = await ensureConnected();
+
       const code = joinInput.toUpperCase().trim();
       const tag = codeToTag(code);
 
@@ -384,7 +383,7 @@ export default function App() {
       setConnectionStatus('connecting');
       setConnectionStage('signaling');
 
-      const peer = await rondevu.peer({ tags: [tag] });
+      const peer = await client.peer({ tags: [tag] });
 
       // Track connection stages
       peer.on('state', (state) => {
