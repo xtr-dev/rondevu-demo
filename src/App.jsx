@@ -1,9 +1,19 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Rondevu } from '@xtr-dev/rondevu-client';
 import toast, { Toaster } from 'react-hot-toast';
 import QRCode from 'qrcode';
+import DataTable, { createTheme } from 'react-data-table-component';
 import ChatPanel from './components/ChatPanel';
 import ConnectionStages, { getStageText } from './components/ConnectionStages';
+
+// Create dark theme for DataTable
+createTheme('rondevu', {
+  text: { primary: '#e0e0e0', secondary: '#808080' },
+  background: { default: '#1a1a1a' },
+  context: { background: '#2a2a2a', text: '#e0e0e0' },
+  divider: { default: '#2a2a2a' },
+  sortFocus: { default: '#4a9eff' },
+}, 'dark');
 
 const API_URL = 'https://api.ronde.vu';
 const CHUNK_SIZE = 16 * 1024; // 16KB chunks
@@ -41,6 +51,8 @@ const getFileIcon = (mimeType) => {
 const ICE_PRESETS = [
   { value: 'rondevu', label: 'Rondevu (recommended)' },
   { value: 'rondevu-relay', label: 'Rondevu (relay only)' },
+  { value: 'rondevu-ipv4', label: 'Rondevu IPv4' },
+  { value: 'rondevu-ipv4-relay', label: 'Rondevu IPv4 (relay)' },
   { value: 'google-stun', label: 'Google STUN' },
   { value: 'public-stun', label: 'Public STUN (multiple)' },
 ];
@@ -58,7 +70,7 @@ export default function App() {
   // Session
   const [sessionCode, setSessionCode] = useState(null);
   const [isHost, setIsHost] = useState(false);
-  const [peerUsername, setPeerUsername] = useState(null);
+  const [connectedPeers, setConnectedPeers] = useState([]); // Array of connected peer usernames
   const [connectionStatus, setConnectionStatus] = useState('disconnected'); // disconnected | waiting | connecting | connected
   const [connectionStage, setConnectionStage] = useState(''); // signaling | checking | connected
   const [dataChannel, setDataChannel] = useState(null);
@@ -71,6 +83,7 @@ export default function App() {
   const incomingFilesRef = useRef({}); // Track incoming file chunks
   const transfersRef = useRef([]); // Ref for access in callbacks
   const dataChannelRef = useRef(null); // Ref for dataChannel access in callbacks
+  const allChannelsRef = useRef(new Set()); // Track all connected data channels for broadcasting
 
   // Chat
   const [chatMessages, setChatMessages] = useState([]);
@@ -93,8 +106,86 @@ export default function App() {
   // UI
   const [joinInput, setJoinInput] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState(null);
+  const [chatOpen, setChatOpen] = useState(false); // For mobile chat toggle
+
+  // Password protection
+  const [sessionPassword, setSessionPassword] = useState('');
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [pendingPasswordChannel, setPendingPasswordChannel] = useState(null); // Channel waiting for password
+  const sessionPasswordRef = useRef('');
+  useEffect(() => { sessionPasswordRef.current = sessionPassword; }, [sessionPassword]);
 
   const fileInputRef = useRef(null);
+
+  // DataTable columns for file list (must be before any conditional returns)
+  const fileColumns = useMemo(() => [
+    {
+      name: '',
+      selector: row => row.direction,
+      cell: row => <span className="file-direction">{row.direction === 'in' ? '↓' : '↑'}</span>,
+      width: '40px',
+      sortable: false,
+    },
+    {
+      name: '',
+      cell: row => <span className="file-icon">{getFileIcon(row.mimeType)}</span>,
+      width: '40px',
+      sortable: false,
+    },
+    {
+      name: 'Name',
+      selector: row => row.name,
+      sortable: true,
+      grow: 2,
+    },
+    {
+      name: 'Size',
+      selector: row => row.size,
+      cell: row => formatSize(row.size),
+      sortable: true,
+      width: '100px',
+    },
+    {
+      name: 'Status',
+      selector: row => row.status,
+      sortable: true,
+      width: '140px',
+      cell: row => {
+        if (row.status === 'transferring') {
+          return (
+            <div className="file-progress">
+              <div className="progress-bar-inline">
+                <div className="progress-fill" style={{ width: `${row.progress}%` }} />
+              </div>
+              <span className="progress-text">{row.progress}%</span>
+            </div>
+          );
+        }
+        if (row.status === 'available' && row.direction === 'in') {
+          return (
+            <span>
+              <a className="table-link" onClick={() => handleDownload(row)}>Download</a>
+              {row.uploadCount > 0 && <span className="upload-count"> ({row.uploadCount.toFixed(2)})</span>}
+            </span>
+          );
+        }
+        if (row.status === 'available' && row.direction === 'out' && !row.uploadCount) {
+          return <span className="file-status ready">Ready</span>;
+        }
+        if (row.status === 'requesting') {
+          return <span className="file-status requesting">Requesting...</span>;
+        }
+        if (row.status === 'complete' && row.direction === 'in') {
+          return <a className="table-link" onClick={() => handleDownload(row)}>Save</a>;
+        }
+        if ((row.status === 'complete' || row.uploadCount > 0) && row.direction === 'out') {
+          return <span className="file-status complete">{(row.uploadCount || 0).toFixed(2)}</span>;
+        }
+        return null;
+      },
+    },
+  ], []);
 
   // Check URL for join code on mount (supports /CODE and ?join=CODE)
   useEffect(() => {
@@ -221,40 +312,113 @@ export default function App() {
     try {
       const msg = JSON.parse(event.data);
 
+      // Password protocol - must be checked before any other messages
+      if (msg.type === 'password-check') {
+        // Host receives password check from joining peer
+        if (sessionPasswordRef.current && !msg.password) {
+          // Password required but peer didn't send one - prompt them
+          event.target.send(JSON.stringify({ type: 'password-required' }));
+        } else if (!sessionPasswordRef.current || msg.password === sessionPasswordRef.current) {
+          // No password set OR correct password
+          event.target.send(JSON.stringify({ type: 'password-ok' }));
+        } else {
+          // Wrong password
+          event.target.send(JSON.stringify({ type: 'password-fail' }));
+          setTimeout(() => event.target.close(), 100);
+        }
+        return;
+      } else if (msg.type === 'password-ok') {
+        // Peer receives password accepted - send identify
+        event.target.send(JSON.stringify({ type: 'identify', from: username }));
+        return;
+      } else if (msg.type === 'password-fail') {
+        toast.error('Incorrect password');
+        setConnectionStatus('disconnected');
+        setSessionCode(null);
+        window.history.replaceState({}, '', '/');
+        return;
+      } else if (msg.type === 'password-required') {
+        // Host tells peer that password is required
+        setPendingPasswordChannel(event.target);
+        setShowPasswordModal(true);
+        return;
+      }
+
       if (msg.type === 'identify') {
-        setPeerUsername(msg.from);
+        // Add peer to connected list
+        setConnectedPeers(prev => prev.includes(msg.from) ? prev : [...prev, msg.from]);
         setConnectionStatus('connected');
         // Send ack
         event.target.send(JSON.stringify({ type: 'identify_ack', from: username }));
-        // If host, send chat history
+        // Send chat history
         if (chatMessagesRef.current.length > 0) {
           event.target.send(JSON.stringify({
             type: 'chat-history',
             messages: chatMessagesRef.current.map(m => ({ from: m.from, text: m.text, timestamp: m.timestamp })),
           }));
         }
-        toast.success(`Connected to ${msg.from}!`);
+        // Send available files to new peer
+        transfersRef.current.filter(t => t.direction === 'out' && t.pendingFile).forEach(t => {
+          event.target.send(JSON.stringify({
+            type: 'file-offer',
+            id: t.id,
+            name: t.name,
+            size: t.size,
+            mimeType: t.mimeType,
+            sender: username,
+            uploadCount: t.uploadCount || 0,
+          }));
+        });
+        toast.success(`${msg.from} joined`);
       } else if (msg.type === 'identify_ack') {
-        setPeerUsername(msg.from);
+        // Add peer to connected list
+        setConnectedPeers(prev => prev.includes(msg.from) ? prev : [...prev, msg.from]);
         setConnectionStatus('connected');
-        toast.success(`Connected to ${msg.from}!`);
+        // Send available files to host
+        transfersRef.current.filter(t => t.direction === 'out' && t.pendingFile).forEach(t => {
+          event.target.send(JSON.stringify({
+            type: 'file-offer',
+            id: t.id,
+            name: t.name,
+            size: t.size,
+            mimeType: t.mimeType,
+            sender: username,
+            uploadCount: t.uploadCount || 0,
+          }));
+        });
       } else if (msg.type === 'file-offer') {
         // Show file as available - can be downloaded on demand
-        setTransfers(prev => [...prev, {
-          id: msg.id,
-          name: msg.name,
-          size: msg.size,
-          mimeType: msg.mimeType,
-          progress: 0,
-          direction: 'in',
-          status: 'available',
-          sender: msg.sender || peerUsername, // Use sender from message
-        }]);
+        // Check for duplicate by ID before adding
+        setTransfers(prev => {
+          const existing = prev.find(t => t.id === msg.id);
+          if (existing) {
+            // Update existing file with latest info (e.g., uploadCount)
+            return prev.map(t => t.id === msg.id ? {
+              ...t,
+              uploadCount: msg.uploadCount || t.uploadCount,
+            } : t);
+          }
+          // Add new file
+          return [...prev, {
+            id: msg.id,
+            name: msg.name,
+            size: msg.size,
+            mimeType: msg.mimeType,
+            progress: 0,
+            direction: 'in',
+            status: 'available',
+            sender: msg.sender,
+            uploadCount: msg.uploadCount || 0,
+            // Store the data channel for requesting from correct peer
+            _sourceChannel: event.target,
+          }];
+        });
       } else if (msg.type === 'file-request') {
         // Peer requested a file, start sending it
+        // Use event.target (the requesting peer's channel) to send data
         const transfer = transfersRef.current.find(t => t.id === msg.id);
         if (transfer && transfer.pendingFile) {
-          sendFileData(msg.id, transfer.pendingFile);
+          sendFileData(msg.id, transfer.pendingFile, event.target);
         }
       } else if (msg.type === 'file-start') {
         // Peer is starting to send accepted file
@@ -290,11 +454,16 @@ export default function App() {
           ...m,
           isYou: m.from === username,
         })));
+      } else if (msg.type === 'upload-count') {
+        // Update upload count for a file
+        setTransfers(prev => prev.map(t =>
+          t.id === msg.id ? { ...t, uploadCount: msg.count } : t
+        ));
       }
     } catch (err) {
       console.error('Failed to parse message:', err);
     }
-  }, [username, peerUsername]);
+  }, [username]);
 
   // Setup data channel handlers
   const setupDataChannel = useCallback((dc) => {
@@ -304,19 +473,27 @@ export default function App() {
       console.log('Data channel opened');
       setDataChannel(dc);
       dataChannelRef.current = dc; // Set ref immediately
-      // Send identify
-      dc.send(JSON.stringify({ type: 'identify', from: username }));
+      allChannelsRef.current.add(dc); // Track for broadcasting
+      // Don't send identify here - wait for password check from peer
+      // The password protocol will trigger identify exchange after verification
     };
 
     dc.onopen = handleOpen;
 
     dc.onclose = () => {
       console.log('Data channel closed');
-      setDataChannel(null);
-      setConnectionStatus('disconnected');
-      // Remove files shared by the disconnected peer
-      setTransfers(prev => prev.filter(t => t.sender !== peerUsername));
-      setPeerUsername(null);
+      allChannelsRef.current.delete(dc); // Remove from tracking
+      // Update dataChannelRef if this was the current one
+      if (dataChannelRef.current === dc) {
+        const remaining = Array.from(allChannelsRef.current);
+        dataChannelRef.current = remaining.length > 0 ? remaining[0] : null;
+        setDataChannel(dataChannelRef.current);
+      }
+      // Decrement peer count (we don't know which peer, so just remove one)
+      setConnectedPeers(prev => prev.slice(0, -1));
+      if (allChannelsRef.current.size === 0) {
+        setConnectionStatus('waiting');
+      }
     };
 
     dc.onmessage = handleMessage;
@@ -354,11 +531,11 @@ export default function App() {
       });
 
       // Create and start offers with session tag (auto-starts)
+      // maxOffers: 5 allows multiple peers to connect
       await client.offer({
         tags: [tag],
-        maxOffers: 1,
+        maxOffers: 5,
       });
-      toast.success('Session created!');
     } catch (err) {
       console.error('Failed to start session:', err);
       toast.error(`Failed to start session: ${err.message}`);
@@ -381,6 +558,8 @@ export default function App() {
       setSessionCode(code);
       setIsHost(false);
       setConnectionStatus('connecting');
+      // Sync URL immediately
+      window.history.replaceState({}, '', `/${code}`);
       setConnectionStage('signaling');
 
       const peer = await client.peer({ tags: [tag] });
@@ -396,19 +575,22 @@ export default function App() {
         setPeerConnection(peer.peerConnection);
         setDataChannel(peer.dataChannel);
         dataChannelRef.current = peer.dataChannel; // Set ref immediately
+        allChannelsRef.current.add(peer.dataChannel); // Add to broadcast set
         peer.dataChannel.binaryType = 'arraybuffer';
 
-        // Send identify
-        peer.send(JSON.stringify({ type: 'identify', from: username }));
+        // Send password check first (empty password to check if required)
+        peer.send(JSON.stringify({ type: 'password-check', password: '' }));
       });
 
       peer.on('message', (data) => handleMessage({ data, target: peer.dataChannel }));
 
       peer.on('close', () => {
+        allChannelsRef.current.delete(peer.dataChannel); // Remove from broadcast set
         setConnectionStatus('disconnected');
         setConnectionStage('');
-        setPeerUsername(null);
+        setConnectedPeers([]);
         setDataChannel(null);
+        dataChannelRef.current = null;
         toast.error('Connection closed');
       });
 
@@ -416,22 +598,25 @@ export default function App() {
         console.error('Peer error:', err);
         toast.error(`Connection error: ${err.message}`);
       });
-
-      // Clear URL (reset to root)
-      window.history.replaceState({}, '', '/');
     } catch (err) {
       console.error('Failed to join session:', err);
-      toast.error(`Failed to join: ${err.message}`);
+      // If no peers found, session doesn't exist - return to home silently
+      if (err.message?.includes('No peers found')) {
+        window.history.replaceState({}, '', '/');
+        toast.error('Session not found or has ended');
+      } else {
+        toast.error(`Failed to join: ${err.message}`);
+      }
       setSessionCode(null);
       setConnectionStatus('disconnected');
       setConnectionStage('');
     }
   };
 
-  // Auto-join when rondevu is ready and we have a join code from URL
+  // Auto-join when we have a join code from URL and username is ready
   const autoJoinTriggered = useRef(false);
   useEffect(() => {
-    if (rondevu && joinInput && !autoJoinTriggered.current && !sessionCode) {
+    if (username && joinInput && !autoJoinTriggered.current && !sessionCode && setupStep === 'ready') {
       // Check if this was from URL (path or query param)
       const pathCode = window.location.pathname.slice(1).toUpperCase();
       const queryCode = new URLSearchParams(window.location.search).get('join')?.toUpperCase();
@@ -440,12 +625,34 @@ export default function App() {
         handleJoinSession();
       }
     }
-  }, [rondevu, joinInput, sessionCode]);
+  }, [username, joinInput, sessionCode, setupStep]);
+
+  // Keep URL in sync with session code
+  useEffect(() => {
+    if (sessionCode) {
+      window.history.replaceState({}, '', `/${sessionCode}`);
+    }
+  }, [sessionCode]);
+
+  // Warn host before leaving/refreshing (session will end)
+  useEffect(() => {
+    if (!isHost || !sessionCode) return;
+
+    const handleBeforeUnload = (e) => {
+      e.preventDefault();
+      e.returnValue = 'Leaving will end your session. Are you sure?';
+      return e.returnValue;
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isHost, sessionCode]);
 
   // Leave session
   const handleLeaveSession = () => {
     try {
-      dataChannel?.close();
+      // Close all data channels
+      allChannelsRef.current.forEach(dc => dc.close());
       peerConnection?.close();
       rondevu?.stopFilling();
     } catch (err) {
@@ -455,11 +662,14 @@ export default function App() {
     setSessionCode(null);
     setIsHost(false);
     setConnectionStatus('disconnected');
-    setPeerUsername(null);
+    setConnectedPeers([]);
     setDataChannel(null);
     setPeerConnection(null);
     setTransfers([]);
     incomingFilesRef.current = {};
+    allChannelsRef.current.clear();
+    // Clear URL
+    window.history.replaceState({}, '', '/');
     toast.success('Left session');
   };
 
@@ -468,9 +678,48 @@ export default function App() {
     window.location.reload();
   };
 
+  // Submit password (peer entering password for protected session)
+  const handlePasswordSubmit = () => {
+    if (pendingPasswordChannel && pendingPasswordChannel.readyState === 'open') {
+      pendingPasswordChannel.send(JSON.stringify({ type: 'password-check', password: passwordInput }));
+      setShowPasswordModal(false);
+      setPasswordInput('');
+      setPendingPasswordChannel(null);
+    }
+  };
+
+  // Cancel password entry (peer canceling join)
+  const handlePasswordCancel = () => {
+    if (pendingPasswordChannel) {
+      pendingPasswordChannel.close();
+    }
+    setShowPasswordModal(false);
+    setPasswordInput('');
+    setPendingPasswordChannel(null);
+    setSessionCode(null);
+    setConnectionStatus('disconnected');
+    window.history.replaceState({}, '', '/');
+  };
+
+  // Toggle password for session (host)
+  const handleSetPassword = () => {
+    const password = prompt('Set session password (leave empty to remove):');
+    if (password !== null) {
+      setSessionPassword(password);
+      if (password) {
+        toast.success('Password set');
+      } else {
+        toast.success('Password removed');
+      }
+    }
+  };
+
   // Send file offer (file is available for peer to download on demand)
   const sendFile = async (file) => {
-    if (!dataChannel || dataChannel.readyState !== 'open') {
+    // Check if any channel is open
+    const openChannels = Array.from(allChannelsRef.current).filter(dc => dc.readyState === 'open');
+
+    if (openChannels.length === 0) {
       // Queue file if host is waiting for peer
       if (isHost && connectionStatus === 'waiting') {
         setQueuedFiles(prev => [...prev, file]);
@@ -494,6 +743,7 @@ export default function App() {
       status: 'available',
       pendingFile: file,
       sender: username, // Track who shared this file
+      uploadCount: 0, // Track how many times this file has been uploaded
     };
 
     // Update ref immediately so file-request handler can access it
@@ -502,22 +752,24 @@ export default function App() {
     // Also update state for React re-render
     setTransfers(prev => [...prev, newTransfer]);
 
-    // Send file-offer message (peer can request download when ready)
-    dataChannel.send(JSON.stringify({
+    // Broadcast file-offer to all connected peers
+    const offerMsg = JSON.stringify({
       type: 'file-offer',
       id: fileId,
       name: file.name,
       size: file.size,
       mimeType: file.type,
-      sender: username, // Include sender username
-    }));
+      sender: username,
+    });
+    openChannels.forEach(dc => dc.send(offerMsg));
 
     toast.success(`Shared: ${file.name}`);
   };
 
   // Actually send file data (called after peer accepts)
-  const sendFileData = async (fileId, file) => {
-    const dc = dataChannelRef.current;
+  // targetChannel is the specific peer's channel that requested the file
+  const sendFileData = async (fileId, file, targetChannel) => {
+    const dc = targetChannel || dataChannelRef.current;
     if (!dc || dc.readyState !== 'open') {
       toast.error('Not connected');
       return;
@@ -525,9 +777,9 @@ export default function App() {
 
     const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-    // Update status to transferring
+    // Update status to transferring (keep pendingFile so file can be re-sent to other peers)
     setTransfers(prev => prev.map(t =>
-      t.id === fileId ? { ...t, status: 'transferring', pendingFile: undefined } : t
+      t.id === fileId ? { ...t, status: 'transferring' } : t
     ));
 
     // Send file-start message so receiver prepares to receive chunks
@@ -591,10 +843,24 @@ export default function App() {
         ));
       }
 
-      // Mark complete
-      setTransfers(prev => prev.map(t =>
-        t.id === fileId ? { ...t, progress: 100, status: 'complete' } : t
-      ));
+      // Mark complete and increment upload count
+      setTransfers(prev => {
+        const updated = prev.map(t => {
+          if (t.id === fileId) {
+            const newCount = (t.uploadCount || 0) + 1;
+            // Broadcast count to all peers
+            const countMsg = JSON.stringify({ type: 'upload-count', id: fileId, count: newCount });
+            allChannelsRef.current.forEach(channel => {
+              if (channel.readyState === 'open') {
+                channel.send(countMsg);
+              }
+            });
+            return { ...t, progress: 100, status: 'complete', uploadCount: newCount };
+          }
+          return t;
+        });
+        return updated;
+      });
     };
 
     try {
@@ -639,9 +905,10 @@ export default function App() {
 
     // If incoming file not yet transferred, request it
     if (transfer.direction === 'in' && transfer.status === 'available') {
-      const dc = dataChannelRef.current;
+      // Use the source channel stored when we received the offer
+      const dc = transfer._sourceChannel || dataChannelRef.current;
       if (!dc || dc.readyState !== 'open') {
-        toast.error('Not connected');
+        toast.error('Peer disconnected');
         return;
       }
 
@@ -677,15 +944,18 @@ export default function App() {
     // Add to local state
     setChatMessages(prev => [...prev, message]);
 
-    // Send to peer if connected
-    if (dataChannel?.readyState === 'open') {
-      dataChannel.send(JSON.stringify({
-        type: 'chat',
-        from: message.from,
-        text: message.text,
-        timestamp: message.timestamp,
-      }));
-    }
+    // Broadcast to all connected peers
+    const chatMsg = JSON.stringify({
+      type: 'chat',
+      from: message.from,
+      text: message.text,
+      timestamp: message.timestamp,
+    });
+    allChannelsRef.current.forEach(dc => {
+      if (dc.readyState === 'open') {
+        dc.send(chatMsg);
+      }
+    });
   };
 
   // Handle chat submit
@@ -732,7 +1002,7 @@ export default function App() {
       <div className="container">
         <Toaster position="top-center" />
         <div className="center-box">
-          <h1 className="title">Rondevu Drop</h1>
+          <h1 className="title">ronde.vu</h1>
           <p className="subtitle">Share files directly, peer-to-peer</p>
 
           <div className="form-group">
@@ -762,25 +1032,32 @@ export default function App() {
         <Toaster position="top-center" />
 
         <div className="header">
-          <span className="username">{username}</span>
-          <div className="header-controls">
-            <select
-              className="ice-select"
-              value={icePreset}
-              onChange={(e) => setIcePreset(e.target.value)}
-              disabled={rondevu !== null}
-              title={rondevu ? 'ICE preset is set when client initializes' : 'Select ICE server preset'}
+          <span className="header-brand">ronde.vu</span>
+          <div className="header-center">
+            <span className="username">{username}</span>
+            <button
+              onClick={handleNewIdentity}
+              className="refresh-btn"
+              title="Get new identity"
             >
-              {ICE_PRESETS.map(p => (
-                <option key={p.value} value={p.value}>{p.label}</option>
-              ))}
-            </select>
-            <button onClick={handleNewIdentity} className="button text">New Identity</button>
+              ♻️
+            </button>
           </div>
+          <select
+            className="ice-select"
+            value={icePreset}
+            onChange={(e) => setIcePreset(e.target.value)}
+            disabled={rondevu !== null}
+            title={rondevu ? 'ICE preset is set when client initializes' : 'Select ICE server preset'}
+          >
+            {ICE_PRESETS.map(p => (
+              <option key={p.value} value={p.value}>{p.label}</option>
+            ))}
+          </select>
         </div>
 
         <div className="center-box">
-          <h1 className="title">Rondevu Drop</h1>
+          <h1 className="title">ronde.vu</h1>
           <p className="subtitle">Share files directly, peer-to-peer</p>
 
           <button onClick={handleStartSession} className="button primary full large">
@@ -818,7 +1095,7 @@ export default function App() {
   if (connectionStatus === 'waiting' && isHost) {
     return (
       <div
-        className={`container ${isDragOver ? 'drag-over' : ''}`}
+        className={`container fullscreen ${isDragOver ? 'drag-over' : ''}`}
         onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
         onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false); }}
         onDrop={handleDrop}
@@ -834,52 +1111,66 @@ export default function App() {
         />
 
         <div className="header">
-          <span className="session-label">Session: {sessionCode} - Waiting for peer...</span>
+          <span className="header-brand">ronde.vu</span>
+          <div className="header-center">
+            <span className="session-code" onClick={copyLink} title="Click to copy link">
+              {sessionCode}
+            </span>
+            <button
+              className={`lock-button ${sessionPassword ? 'locked' : ''}`}
+              onClick={handleSetPassword}
+              title={sessionPassword ? 'Password protected (click to change)' : 'Set password'}
+            >
+              {sessionPassword ? '🔒' : '🔓'}
+            </button>
+          </div>
           <button onClick={handleLeaveSession} className="button text danger">Leave</button>
         </div>
 
-        <div className="main-content">
-          {/* Share code section */}
-          <div className="share-section">
-            <div className="code-display" onClick={copyCode}>
-              <span className="code">{sessionCode}</span>
-              <button className="copy-btn">Copy Code</button>
-            </div>
-            <div className="share-link">
-              <span className="share-url">{window.location.origin}/{sessionCode}</span>
-              <button className="button small primary" onClick={copyLink}>Copy Link</button>
-            </div>
-          </div>
-
-          {/* File drop hint */}
-          <div className="drop-hint-banner" onClick={() => fileInputRef.current?.click()}>
-            <span>📁 Drop files anywhere to queue them, or <button className="link-button">browse</button></span>
-            <span className="drop-hint-sub">Files will be sent when peer connects</span>
-          </div>
-
-          {/* Queued files list */}
-          {queuedFiles.length > 0 && (
-            <div className="transfers">
-              <h3 className="transfers-title">Queued Files ({queuedFiles.length})</h3>
-              {queuedFiles.map((file, i) => (
-                <div key={i} className="transfer-item">
-                  <div className="transfer-icon">{getFileIcon(file.type)}</div>
-                  <div className="transfer-info">
-                    <div className="transfer-name">{file.name}</div>
-                    <div className="transfer-meta">{formatSize(file.size)}</div>
-                  </div>
+        <div className="split-layout">
+          {/* Files pane */}
+          <div className="files-pane">
+            <div className="file-list full">
+              <div className="file-list-header">
+                <span>Files{queuedFiles.length > 0 ? ` (${queuedFiles.length})` : ''}</span>
+                <button className="header-action" onClick={() => fileInputRef.current?.click()}>
+                  + Add files
+                </button>
+              </div>
+              {queuedFiles.length === 0 ? (
+                <div className="file-list-empty">
+                  <span className="empty-icon">📁</span>
+                  <span className="empty-text">Drop files anywhere to share</span>
+                  <span className="empty-hint">or use the Add files button above</span>
                 </div>
-              ))}
+              ) : (
+                queuedFiles.map((file, i) => (
+                  <div key={i} className="file-row">
+                    <span className="file-icon">{getFileIcon(file.type)}</span>
+                    <span className="file-name">{file.name}</span>
+                    <span className="file-size">{formatSize(file.size)}</span>
+                    <span className="file-status queued">Queued</span>
+                  </div>
+                ))
+              )}
             </div>
-          )}
+          </div>
 
-          <ChatPanel
-            messages={chatMessages}
-            input={chatInput}
-            onInputChange={setChatInput}
-            onSubmit={handleChatSubmit}
-          />
+          {/* Chat pane */}
+          <div className={`chat-pane ${chatOpen ? 'open' : ''}`}>
+            <ChatPanel
+              messages={chatMessages}
+              input={chatInput}
+              onInputChange={setChatInput}
+              onSubmit={handleChatSubmit}
+            />
+          </div>
         </div>
+
+        {/* Mobile chat FAB */}
+        <button className="chat-fab" onClick={() => setChatOpen(!chatOpen)}>
+          {chatOpen ? '✕' : '💬'}
+        </button>
       </div>
     );
   }
@@ -894,6 +1185,29 @@ export default function App() {
           <ConnectionStages currentStage={connectionStage} />
           <p className="waiting-subtitle">{getStageText(connectionStage)}</p>
         </div>
+
+        {/* Password modal */}
+        {showPasswordModal && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h3>Password Required</h3>
+              <p>This session is password protected.</p>
+              <input
+                type="password"
+                placeholder="Enter password"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
+                className="input"
+                autoFocus
+              />
+              <div className="modal-buttons">
+                <button onClick={handlePasswordCancel} className="button text">Cancel</button>
+                <button onClick={handlePasswordSubmit} className="button primary">Submit</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -901,7 +1215,7 @@ export default function App() {
   // Render connected - file sharing view
   return (
     <div
-      className={`container ${isDragOver ? 'drag-over' : ''}`}
+      className={`container fullscreen ${isDragOver ? 'drag-over' : ''}`}
       onDragOver={(e) => { e.preventDefault(); setIsDragOver(true); }}
       onDragLeave={(e) => { if (e.currentTarget === e.target || !e.currentTarget.contains(e.relatedTarget)) setIsDragOver(false); }}
       onDrop={handleDrop}
@@ -917,92 +1231,67 @@ export default function App() {
       />
 
       <div className="header">
-        <div className="header-left">
-          <span className="connected-label">Connected to {peerUsername}</span>
-          <span className="session-info" onClick={copyLink} title="Click to copy link">
-            {sessionCode}
-          </span>
+        <span className="header-brand">ronde.vu</span>
+        <div className="header-center">
+          {connectionStage === 'reconnecting' ? (
+            <span className="peer-info warning">Reconnecting...</span>
+          ) : connectionStage === 'disconnected' || connectionStage === 'failed' ? (
+            <span className="peer-info warning">Disconnected</span>
+          ) : (
+            <span className="peer-info">{connectedPeers.length} peer{connectedPeers.length !== 1 ? 's' : ''} connected</span>
+          )}
         </div>
         <button onClick={handleLeaveSession} className="button text danger">Leave</button>
       </div>
 
-      <div className="main-content">
-        {/* File drop hint */}
-        <div className="drop-hint-banner" onClick={() => fileInputRef.current?.click()}>
-          <span>📁 Drop files anywhere to send them, or <button className="link-button">browse</button></span>
+      <div className="split-layout">
+        {/* Files pane */}
+        <div className="files-pane">
+          <div className="file-list full">
+            <div className="file-list-header">
+              <span>Files{transfers.length > 0 ? ` (${transfers.length})` : ''}</span>
+              <button className="header-action" onClick={() => fileInputRef.current?.click()}>
+                + Add files
+              </button>
+            </div>
+            {transfers.length === 0 ? (
+              <div className="file-list-empty">
+                <span className="empty-icon">📁</span>
+                <span className="empty-text">Drop files anywhere to share</span>
+                <span className="empty-hint">or use the Add files button above</span>
+              </div>
+            ) : (
+              <DataTable
+                columns={fileColumns}
+                data={transfers}
+                theme="rondevu"
+                dense
+                noHeader
+                defaultSortFieldId={3}
+                customStyles={{
+                  rows: { style: { minHeight: '48px' } },
+                  cells: { style: { paddingLeft: '12px', paddingRight: '12px' } },
+                }}
+              />
+            )}
+          </div>
         </div>
 
-        {/* Transfers list */}
-        {transfers.length > 0 && (
-          <div className="transfers">
-            <h3 className="transfers-title">Transfers</h3>
-            {transfers.map(transfer => (
-              <div key={transfer.id} className="transfer-item">
-                <div className="transfer-icon">{getFileIcon(transfer.mimeType)}</div>
-                <div className="transfer-info">
-                  <div className="transfer-name">
-                    {transfer.direction === 'in' ? '↓' : '↑'} {transfer.name}
-                  </div>
-                  <div className="transfer-meta">
-                    {formatSize(transfer.size)}
-                    {transfer.sender && ` • from ${transfer.sender}`}
-                  </div>
-                  {transfer.status === 'transferring' && (
-                    <div className="progress-bar">
-                      <div
-                        className="progress-fill"
-                        style={{ width: `${transfer.progress}%` }}
-                      />
-                    </div>
-                  )}
-                </div>
-                <div className="transfer-actions">
-                  {transfer.status === 'available' && transfer.direction === 'in' && (
-                    <button
-                      className="button small primary"
-                      onClick={() => handleDownload(transfer)}
-                    >
-                      Download
-                    </button>
-                  )}
-                  {transfer.status === 'available' && transfer.direction === 'out' && (
-                    <span className="status-available">Ready</span>
-                  )}
-                  {transfer.status === 'requesting' && (
-                    <span className="status-waiting">Requesting...</span>
-                  )}
-                  {transfer.status === 'transferring' && transfer.direction === 'out' && (
-                    <span className="status-progress">
-                      {formatSize(transfer.uploadedBytes || 0)} / {formatSize(transfer.size)}
-                    </span>
-                  )}
-                  {transfer.status === 'transferring' && transfer.direction === 'in' && (
-                    <span className="status-progress">{transfer.progress}%</span>
-                  )}
-                  {transfer.status === 'complete' && transfer.direction === 'in' && (
-                    <button
-                      className="button small"
-                      onClick={() => handleDownload(transfer)}
-                    >
-                      Save
-                    </button>
-                  )}
-                  {transfer.status === 'complete' && transfer.direction === 'out' && (
-                    <span className="status-sent">Uploaded</span>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        <ChatPanel
-          messages={chatMessages}
-          input={chatInput}
-          onInputChange={setChatInput}
-          onSubmit={handleChatSubmit}
-        />
+        {/* Chat pane */}
+        <div className={`chat-pane ${chatOpen ? 'open' : ''}`}>
+          <ChatPanel
+            messages={chatMessages}
+            input={chatInput}
+            onInputChange={setChatInput}
+            onSubmit={handleChatSubmit}
+          />
+        </div>
       </div>
+
+      {/* Mobile chat FAB */}
+      <button className="chat-fab" onClick={() => setChatOpen(!chatOpen)}>
+        {chatOpen ? '✕' : '💬'}
+      </button>
     </div>
   );
 }

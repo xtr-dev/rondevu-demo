@@ -1,4 +1,4 @@
-# Rondevu Drop
+# ronde.vu
 
 **P2P File Sharing - Share files directly, no server upload**
 
