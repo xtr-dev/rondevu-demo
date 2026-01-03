@@ -1213,6 +1213,36 @@ export default function App() {
   }
 
   // Render connecting
+  // Handle ICE preset change during connection - restart with new config
+  const handleIcePresetChange = async (newPreset) => {
+    setIcePreset(newPreset);
+    icePresetRef.current = newPreset;
+
+    // Reset connection state
+    if (peerConnection) {
+      peerConnection.close();
+      setPeerConnection(null);
+    }
+    if (dataChannel) {
+      dataChannel.close();
+      setDataChannel(null);
+    }
+
+    // Brief delay then retry connection
+    toast.success(`Switching to ${ICE_PRESETS.find(p => p.value === newPreset)?.label || newPreset}`);
+    setConnectionStage('signaling');
+
+    // Re-initiate connection based on role
+    setTimeout(() => {
+      if (isHost) {
+        // Host waits for peers - no action needed, will reconnect on next peer
+      } else {
+        // Joiner needs to re-discover and connect
+        handleJoinSession(sessionCode);
+      }
+    }, 500);
+  };
+
   if (connectionStatus === 'connecting') {
     return (
       <div className="container">
@@ -1221,6 +1251,25 @@ export default function App() {
           <h2 className="waiting-title">Connecting...</h2>
           <ConnectionStages currentStage={connectionStage} />
           <p className="waiting-subtitle">{getStageText(connectionStage)}</p>
+
+          <div className="connection-trouble">
+            <details>
+              <summary>Having trouble connecting?</summary>
+              <p className="trouble-hint">Try a different connection method:</p>
+              <select
+                className="ice-select"
+                value={icePreset}
+                onChange={(e) => handleIcePresetChange(e.target.value)}
+              >
+                {ICE_PRESETS.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              <p className="trouble-hint small">
+                "Relay" options can help if you're behind a strict firewall.
+              </p>
+            </details>
+          </div>
         </div>
 
         {/* Password modal */}

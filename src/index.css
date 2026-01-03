@@ -915,6 +915,51 @@ body {
   border-color: #4a9eff;
 }
 
+/* Connection trouble section */
+.connection-trouble {
+  margin-top: 32px;
+  width: 100%;
+}
+
+.connection-trouble details {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  padding: 12px 16px;
+}
+
+.connection-trouble summary {
+  cursor: pointer;
+  color: #808080;
+  font-size: 0.9rem;
+  user-select: none;
+}
+
+.connection-trouble summary:hover {
+  color: #4a9eff;
+}
+
+.connection-trouble details[open] summary {
+  margin-bottom: 12px;
+  color: #e0e0e0;
+}
+
+.connection-trouble .trouble-hint {
+  color: #808080;
+  font-size: 0.85rem;
+  margin: 8px 0;
+}
+
+.connection-trouble .trouble-hint.small {
+  font-size: 0.75rem;
+  color: #666;
+}
+
+.connection-trouble .ice-select {
+  width: 100%;
+  margin-top: 8px;
+}
+
 /* Transfers */
 .transfers {
   background: #1a1a1a;
