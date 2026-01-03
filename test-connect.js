@@ -15,7 +15,7 @@
  *   - Build tools (python, make, g++)
  */
 
-import { Rondevu, NodeCryptoAdapter } from '@xtr-dev/rondevu-client'
+import { Rondevu } from '@xtr-dev/rondevu-client'
 
 // Import wrtc
 let wrtc
@@ -45,13 +45,12 @@ async function main() {
   console.log('='.repeat(50))
 
   try {
-    // 1. Connect to Rondevu with Node crypto adapter and ICE preset
+    // 1. Connect to Rondevu
     console.log('1. Connecting to Rondevu...')
     const rondevu = await Rondevu.connect({
       apiUrl: API_URL,
       username: `test-${Date.now()}`,  // Anonymous test user
-      cryptoAdapter: new NodeCryptoAdapter(),
-      iceServers: 'ipv4-turn'  // Use ICE server preset
+      iceServers: 'rondevu'  // Use official Rondevu TURN/STUN servers
     })
 
     console.log(`   ✓ Connected as: ${rondevu.getUsername()}`)

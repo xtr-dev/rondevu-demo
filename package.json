@@ -1,6 +1,6 @@
 {
   "name": "rondevu-demo",
-  "version": "2.0.0",
+  "version": "2.0.2",
   "description": "Demo application for Rondevu DNS-like WebRTC with username claiming and service discovery",
   "type": "module",
   "scripts": {
@@ -11,7 +11,7 @@
     "test": "node test-connect.js"
   },
   "dependencies": {
-    "@xtr-dev/rondevu-client": "file:../client",
+    "@xtr-dev/rondevu-client": "file:../rondevu-client",
     "@zxing/library": "^0.21.3",
     "qrcode": "^1.5.4",
     "react": "^18.2.0",

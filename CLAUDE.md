@@ -14,28 +14,34 @@ When configuring TURN servers:
 - ❌ **DON'T** omit the port number
 - ❌ **DON'T** assume TURN works without testing
 
-**Current Configuration:**
+**Default Configuration (recommended):**
 ```javascript
-const RTC_CONFIG = {
-  iceServers: [
-    { urls: ["stun:stun.share.fish:3478"] },
-    {
-      urls: [
-        // TURNS (secure) - TLS/DTLS on port 5349 (preferred)
-        "turns:turn.share.fish:5349?transport=tcp",
-        "turns:turn.share.fish:5349?transport=udp",
-        // TURN (fallback) - plain on port 3478
-        "turn:turn.share.fish:3478?transport=tcp",
-        "turn:turn.share.fish:3478?transport=udp",
-      ],
-      username: "webrtcuser",
-      credential: "supersecretpassword"
-    }
-  ]
-};
+// Using built-in preset
+const rondevu = await Rondevu.connect({
+  iceServers: 'rondevu'  // Official Rondevu TURN/STUN servers
+})
 ```
 
-WebRTC will try TURNS (secure) endpoints first, falling back to plain TURN if needed.
+**Custom TURN Configuration:**
+```javascript
+// Configure your own TURN servers for relay support
+const rondevu = await Rondevu.connect({
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    {
+      urls: [
+        'turns:your-server.com:5349?transport=tcp',
+        'turn:your-server.com:3478?transport=tcp',
+        'turn:your-server.com:3478?transport=udp',
+      ],
+      username: 'your-username',
+      credential: 'your-credential'
+    }
+  ]
+})
+```
+
+Popular TURN providers: Twilio, Metered.ca, Cloudflare, or self-hosted coturn.
 
 ### ICE Configuration
 
@@ -69,7 +75,7 @@ The demo includes detailed ICE candidate logging. Check browser console for:
 ### Common Issues
 
 1. **Connection stuck in "connecting":**
-   - Enable relay-only mode to test TURN
+   - Configure TURN servers and use `iceTransportPolicy: 'relay'` to test
    - Check if both peers are behind same NAT (hairpinning issue)
    - Verify TURN credentials are correct
 
