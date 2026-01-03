@@ -343,12 +343,6 @@ export default function App() {
       setIsHost(true);
       setConnectionStatus('waiting');
 
-      // Create offers with session tag
-      await rondevu.offer({
-        tags: [tag],
-        maxOffers: 1,
-      });
-
       // Listen for connections
       rondevu.on('connection:opened', (offerId, connection) => {
         console.log('Connection opened:', offerId);
@@ -362,7 +356,11 @@ export default function App() {
         }
       });
 
-      await rondevu.startFilling();
+      // Create and start offers with session tag (auto-starts)
+      await rondevu.offer({
+        tags: [tag],
+        maxOffers: 1,
+      });
       toast.success('Session created!');
     } catch (err) {
       console.error('Failed to start session:', err);
