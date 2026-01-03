@@ -162,7 +162,8 @@ export default function App() {
       sortable: true,
       width: '140px',
       cell: row => {
-        if (row.status === 'transferring') {
+        // Incoming file being downloaded
+        if (row.status === 'transferring' && row.direction === 'in') {
           return (
             <div className="file-progress">
               <div className="progress-bar-inline">
@@ -172,16 +173,17 @@ export default function App() {
             </div>
           );
         }
-        if (row.status === 'available' && row.direction === 'in') {
-          return (
-            <span>
-              <a className="table-link" onClick={() => handleDownload(row)}>Download</a>
-              {row.uploadCount > 0 && <span className="upload-count"> ({row.uploadCount.toFixed(2)})</span>}
-            </span>
-          );
+        // Outgoing file being uploaded - just show status text, no progress
+        if (row.status === 'transferring' && row.direction === 'out') {
+          return <span className="file-status uploading">Sending...</span>;
         }
-        if (row.status === 'available' && row.direction === 'out' && !row.uploadCount) {
-          return <span className="file-status ready">Ready</span>;
+        if (row.status === 'available' && row.direction === 'in') {
+          return <a className="table-link" onClick={() => handleDownload(row)}>Download</a>;
+        }
+        if (row.status === 'available' && row.direction === 'out') {
+          return row.uploadCount > 0
+            ? <span className="file-status complete">Sent ×{row.uploadCount}</span>
+            : <span className="file-status ready">Ready</span>;
         }
         if (row.status === 'requesting') {
           return <span className="file-status requesting">Requesting...</span>;
@@ -189,8 +191,8 @@ export default function App() {
         if (row.status === 'complete' && row.direction === 'in') {
           return <a className="table-link" onClick={() => handleDownload(row)}>Save</a>;
         }
-        if ((row.status === 'complete' || row.uploadCount > 0) && row.direction === 'out') {
-          return <span className="file-status complete">{(row.uploadCount || 0).toFixed(2)}</span>;
+        if (row.status === 'complete' && row.direction === 'out') {
+          return <span className="file-status complete">Sent ×{row.uploadCount || 1}</span>;
         }
         return null;
       },

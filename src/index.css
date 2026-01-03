@@ -472,6 +472,10 @@ body {
   color: #ffa726;
 }
 
+.file-status.uploading {
+  color: #ffa726;
+}
+
 .file-status.complete {
   color: #4caf50;
 }
